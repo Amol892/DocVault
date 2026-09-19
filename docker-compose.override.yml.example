@@ -1,0 +1,18 @@
+# Copy to docker-compose.override.yml for local development (never for production).
+services:
+  storage:
+    ports:
+      - "9001:9001" # MinIO console
+
+  db:
+    ports:
+      - "5432:5432" # lets host-side pytest / psql reach the database
+
+  api:
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./backend/app:/app/app
+
+  frontend:
+    volumes:
+      - ./frontend/src:/app/src
