@@ -17,7 +17,7 @@ The PRD lives in `PRD/` (index: `PRD/README.md`). Read only the file relevant to
 - Backend lint/format/types: `uv run ruff check . && uv run ruff format . && uv run mypy app`
 - Migration: `uv run alembic revision --autogenerate -m "msg"` then `uv run alembic upgrade head`
 - Frontend (from `frontend/`, pnpm): `pnpm dev | pnpm test | pnpm lint | pnpm build` (build runs `tsc --noEmit`)
-- Backend tests need Postgres reachable via `DATABASE_URL` (start `db` with the compose override so port 5432 is exposed).
+- Backend tests need Postgres reachable via `DATABASE_URL` (start `db` with the compose override; it publishes host port 5433, so `DATABASE_URL` uses `127.0.0.1:5433`).
 
 ## Non-negotiable rules
 1. **Authorization lives in ONE place**: `backend/app/api/deps.py`. Never re-implement role/membership checks inside a route.

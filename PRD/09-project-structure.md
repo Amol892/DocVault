@@ -87,6 +87,7 @@ docvault/
 
 ## Structure notes
 
+- In this repo the specs live in `PRD/` (not `docs/`): `PRD/docvault-erd.drawio` sits beside `PRD/04-database-schema.md`. Every model inherits `RandomIdMixin` and `TimestampMixin` from `backend/app/db/base.py` (see 04).
 - `backend/app/api/deps.py` is deliberately the single place authorization logic lives — matches [03-architecture.md](./03-architecture.md)'s note that this must not be duplicated per-route, and is exactly what [06-permission-matrix.md](./06-permission-matrix.md) describes checking.
 - `backend/app/storage/` holds the `StorageBackend` interface and both implementations side by side, so the abstraction described in [02-tech-stack.md](./02-tech-stack.md) / [08-deployment.md](./08-deployment.md) is visible in the file layout, not just in prose.
 - `backend/tests/` file names map directly to the risk areas called out in [06-permission-matrix.md](./06-permission-matrix.md) (cross-user access, share-link scoping, membership removal, deletion semantics) rather than being organized by route — find "the test that would catch this" by risk area, not by inferring it from generic route-based test files.

@@ -8,6 +8,7 @@ This folder splits the DocVault specification into focused files, one per concer
 | [02-tech-stack.md](./02-tech-stack.md) | Setting up dependencies, `pyproject.toml` / `package.json`, choosing a library version |
 | [03-architecture.md](./03-architecture.md) | Backend layering, request flow, where a new piece of logic belongs |
 | [04-database-schema.md](./04-database-schema.md) | Models, migrations, anything touching PostgreSQL, tables, or relationships |
+| [docvault-erd.drawio](./docvault-erd.drawio) | The editable ERD that backs file 04 |
 | [05-role-model.md](./05-role-model.md) | Anything involving `workspace_members.role`, invites, ownership transfer |
 | [06-permission-matrix.md](./06-permission-matrix.md) | Writing or reviewing an authorization check on any route |
 | [07-functional-requirements.md](./07-functional-requirements.md) | Implementing a specific feature — find its FR number, implement exactly that |
