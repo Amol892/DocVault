@@ -12,8 +12,10 @@ from app.db.base import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # keep the application's own loggers alive when Alembic runs in-process (tests, scripts)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
+# The database URL comes from app.config.Settings (DATABASE_URL), not from alembic.ini.
 target_metadata = Base.metadata
 
 

@@ -6,7 +6,9 @@ services:
 
   db:
     ports:
-      - "5432:5432" # lets host-side pytest / psql reach the database
+      # Host port 5433 (not 5432) so it cannot clash with a PostgreSQL installed on the host,
+      # which would silently receive the connections instead of this container.
+      - "5433:5432" # lets host-side alembic / pytest / psql reach the database
 
   api:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

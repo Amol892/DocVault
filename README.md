@@ -39,7 +39,7 @@ pnpm dev
 pnpm test && pnpm lint && pnpm build
 ```
 
-Backend settings are read from environment variables or a `.env` file in `backend/` (see `.env.example`; use `localhost` instead of the compose hostnames).
+Backend settings come from real environment variables, then the repo-root `.env`, wherever you run the command from. The root `.env` is written for tools on your machine, so `DATABASE_URL` uses `127.0.0.1` (the database port is published by `docker-compose.override.yml`). Docker Compose overrides `DATABASE_URL` and `S3_ENDPOINT_URL` for the containers, so the same `.env` works for both.
 
 ## Layout
 

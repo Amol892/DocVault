@@ -1,10 +1,21 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = BACKEND_DIR.parent
+
+# Absolute paths, so the result does not depend on the directory a command is run from.
+# Later files override earlier ones, and real environment variables override both:
+#   1. <repo>/.env         the one place settings are defined; host-oriented (127.0.0.1). Docker
+#                          Compose overrides DATABASE_URL / S3_ENDPOINT_URL for the containers.
+#   2. <repo>/backend/.env optional per-machine override; normally not needed
+ENV_FILES = (ROOT_DIR / ".env", BACKEND_DIR / ".env")
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILES, extra="ignore")
 
     database_url: str
     s3_endpoint_url: str
