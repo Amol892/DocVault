@@ -7,6 +7,7 @@ dependencies = [
     "aioboto3>=15.5.0",
     "alembic>=1.20.0",
     "asyncpg>=0.31.0",
+    "email-validator==2.3.0",
     "fastapi>=0.141.1",
     "passlib[argon2]>=1.7.4",
     "pydantic-settings>=2.15.0",
@@ -22,6 +23,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.8",
+    "types-passlib==1.7.7.20260211",
 ]
 
 [build-system]
@@ -41,7 +43,8 @@ extend-exclude = ["alembic/versions"]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+# asserts and throwaway credentials are normal in tests
+"tests/*" = ["S101", "S105", "S106"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -51,4 +54,8 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    # passlib 1.7.4 reads argon2.__version__, which argon2-cffi has deprecated (harmless)
+    "ignore:Accessing argon2.__version__:DeprecationWarning",
+]
 pythonpath = ["."]

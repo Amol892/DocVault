@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -23,7 +24,10 @@ class Settings(BaseSettings):
     s3_secret_key: str
     s3_bucket: str = "docvault"
     storage_backend: str = "s3"  # s3 | local
-    jwt_secret: str
+    # HS256 signing key: long enough that it cannot be brute-forced (>= 32 characters).
+    jwt_secret: str = Field(min_length=32)
+    # Access-token lifetime. There is no refresh flow, so expiry means logging in again.
+    jwt_expire_minutes: int = Field(default=1440, gt=0)
     max_upload_mb: int = 100
     frontend_url: str = "http://localhost:5173"
 

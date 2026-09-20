@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import health
+from app.api.routes import auth, health, members, workspaces
 from app.config import get_settings
+from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 
 
@@ -10,6 +11,7 @@ def create_app() -> FastAPI:
     configure_logging()
     settings = get_settings()
     app = FastAPI(title="DocVault API")
+    register_error_handlers(app)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.frontend_url],
@@ -17,7 +19,13 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(health.router)
+    app.include_router(health.router)  # /health stays at the root (compose and CI probe it)
+
+    api = APIRouter(prefix="/api/v1")
+    api.include_router(auth.router)
+    api.include_router(workspaces.router)
+    api.include_router(members.router)
+    app.include_router(api)
     return app
 
 
