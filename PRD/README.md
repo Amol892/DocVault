@@ -14,6 +14,7 @@ This folder splits the DocVault specification into focused files, one per concer
 | [07-functional-requirements.md](./07-functional-requirements.md) | Implementing a specific feature — find its FR number, implement exactly that |
 | [08-deployment.md](./08-deployment.md) | `docker-compose.yml`, env vars, CI, or production config |
 | [09-project-structure.md](./09-project-structure.md) | Deciding where a new file belongs in the repo |
+| [10-api-specification.md](./10-api-specification.md) | The REST contract the frontend is written against (draft; the backend implements it in later tasks) |
 
 **Suggested use in VS Code:** keep this `PRD/` folder at the repo root. When asking an AI assistant (Claude Code, Copilot Chat, etc.) to implement a feature, point it at the specific file(s) above rather than the whole spec — e.g. "implement FR-17 per `PRD/07-functional-requirements.md`, following the authorization pattern in `PRD/06-permission-matrix.md`."
 
