@@ -15,9 +15,9 @@ The PRD lives in `PRD/` (index: `PRD/README.md`). Read only the file relevant to
 - Full stack: `cp .env.example .env` once, then `docker compose up --build` (API :8000, frontend :5173)
 - Backend (from `backend/`, uv-managed): `uv run pytest` (single: `uv run pytest tests/test_x.py -k name`)
 - Backend lint/format/types: `uv run ruff check . && uv run ruff format . && uv run mypy app`
-- Migration: `uv run alembic revision --autogenerate -m "msg"` then `uv run alembic upgrade head`
+- Migration: `uv run alembic revision --autogenerate -m "msg"` then `uv run alembic upgrade head` (revision files are only ever generated, never hand-edited)
 - Frontend (from `frontend/`, pnpm): `pnpm dev | pnpm test | pnpm lint | pnpm build` (build runs `tsc --noEmit`)
-- Backend tests need Postgres reachable via `DATABASE_URL` (start `db` with the compose override; it publishes host port 5433, so `DATABASE_URL` uses `127.0.0.1:5433`).
+- Backend tests use a REAL PostgreSQL: they create and use `<your database>_test` on the server `DATABASE_URL` points at (never the database itself; they refuse any name not ending in `_test`), apply the Alembic migrations to it, and empty it between tests. `DATABASE_URL` must be reachable; the API tests are in `backend/tests/`, named by risk area.
 
 ## Non-negotiable rules
 1. **Authorization lives in ONE place**: `backend/app/api/deps.py`. Never re-implement role/membership checks inside a route.
