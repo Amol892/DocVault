@@ -64,7 +64,9 @@ services:
         condition: service_completed_successfully
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      target: dev
     ports:
       - "5173:5173"
     environment:
