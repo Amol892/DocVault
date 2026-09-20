@@ -8,7 +8,7 @@ The SQLAlchemy models (`backend/app/models/`) are what `alembic revision --autog
 
 | In the models / first migration | Designed here, planned as a follow-up hand-written revision |
 |---|---|
-| All 12 tables, both mixins, enums stored as VARCHAR + named CHECK constraints (`workspace_role`, `upload_status`, `share_access_outcome`) | Deferred exactly-one-owner trigger (the unique index allowing at most one owner **is** in the models) |
+| All 13 tables, both mixins, enums stored as VARCHAR + named CHECK constraints (`workspace_role`, `upload_status`, `share_access_outcome`) | Deferred exactly-one-owner trigger (the unique index allowing at most one owner **is** in the models) |
 | Every foreign key, including the composite ones (the schema has no circular foreign keys) | Folder parent-scope / cycle trigger; document-folder scope trigger; folder-grant and invite-folder triggers |
 | Unique constraints, partial unique indexes (one owner per workspace, no duplicate pending invite, sibling folder names with `NULLS NOT DISTINCT`), CHECK constraints, plain indexes | Append-only triggers on `document_versions`, `share_link_access_logs`, `activity_logs` |
 | Case-insensitive unique email via an index on `lower(email)` | Row-Level Security policies, helper functions and the `docvault_app` role |
@@ -56,6 +56,7 @@ Every table below also has `id` (PK), `created_at`, `updated_at` from the mixins
 
 ```mermaid
 erDiagram
+    users ||--o{ revoked_tokens : "logs out via"
     users ||--o{ workspaces : "owns"
     workspaces ||--o{ workspace_members : "has"
     users ||--o{ workspace_members : "member via"
@@ -82,6 +83,14 @@ erDiagram
         text password_hash
         text name
         boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    revoked_tokens {
+        text id PK
+        text jti UK
+        text user_id FK
+        timestamptz expires_at
         timestamptz created_at
         timestamptz updated_at
     }
@@ -205,6 +214,7 @@ erDiagram
 | Group | Table | Purpose |
 |---|---|---|
 | Identity | `users` | Account identity and credentials |
+| Identity | `revoked_tokens` ➕ | Blacklist of JWTs revoked by logout |
 | Tenancy | `workspaces` | A tenant / team |
 | Tenancy | `workspace_members` | Who belongs to a workspace and at what role |
 | Tenancy | `workspace_invites` | Pending invitations by email (FR-18) |
@@ -238,6 +248,21 @@ Account identity and credentials. Never hard-deleted (deactivate instead) so own
 | `updated_at` | timestamptz | no | — | TimestampMixin — server default now(); ORM onupdate now() |
 
 - **Planned follow-up:** RLS: a user sees themself and people who share a workspace with them; anyone may register (pre-auth insert).
+
+#### `revoked_tokens` ➕
+
+Blacklist of JWTs revoked by logout. A JWT is stateless and stays valid until it expires, so logout stores the token's id here and the API rejects any token listed (FR-3).
+
+| Column | Type | Nullable | Keys | Notes |
+|---|---|:---:|---|---|
+| `id` | text | no | PK | RandomIdMixin — generated in Python (app.core.ids): 12-char base62, letter first |
+| `jti` | text | no | UK | the token's unique id (128-bit random); the token itself is never stored |
+| `user_id` | text | no | FK | → users.id |
+| `expires_at` | timestamptz | no | — | the token's own expiry; once past, the row can be deleted (the token is invalid anyway) |
+| `created_at` | timestamptz | no | — | TimestampMixin — server default now() |
+| `updated_at` | timestamptz | no | — | TimestampMixin — server default now(); ORM onupdate now() |
+
+- Indexes: user_id, expires_at (for the purge). Logout deletes expired rows as it goes.
 
 ### Tenancy
 
@@ -493,7 +518,7 @@ Workspace audit trail (FR-29, FR-30). Append-only.
 |---|---|
 | FR-1 | `users` (email + password). **Email-verification state is not stored** — `email_verified_at` and `auth_tokens` were removed by decision; see "Open items" |
 | FR-2 | `users.password_hash` |
-| FR-3 | No schema impact (stateless JWT) |
+| FR-3 | Stateless JWT; `revoked_tokens` holds the tokens revoked by logout |
 | FR-4 | **Not stored in the schema** (`auth_tokens` removed by decision); see "Open items" |
 | FR-5, FR-6 | `documents` with `workspace_id NULL`; `document_versions.storage_key`, `size_bytes` |
 | FR-7 | `documents.deleted_at` (soft delete + grace clock) |
@@ -522,7 +547,7 @@ Workspace audit trail (FR-29, FR-30). Append-only.
 Everything here is an addition or correction beyond the first version of this document, listed so it can be reviewed:
 
 1. **Primary keys**: UUID → random 12-char base62 text (`RandomIdMixin`); every table has `created_at` / `updated_at` (`TimestampMixin`). `workspace_members` and the new `workspace_invite_folders` get an `id`; the old composite key is a unique constraint.
-2. **New table**: `workspace_invite_folders` (guest invites need their folder scope — FR-21).
+2. **New tables**: `workspace_invite_folders` (guest invites need their folder scope — FR-21) and `revoked_tokens` (logout revokes a JWT by storing its `jti`; a stateless token otherwise stays valid until it expires).
 3. **`users`**: `email_verified` bool **removed** (no `email_verified_at` either, by decision); added `is_active`. No `auth_tokens` table, by decision.
 4. **Soft delete**: `workspaces.deleted_at`, `folders.deleted_at`; `documents.is_deleted` → `deleted_at`.
 5. **`documents`**: `storage_key` removed (the active file is the latest version's); `current_version_id` removed as well (the highest `version_number` is current), so there is no circular foreign key.
