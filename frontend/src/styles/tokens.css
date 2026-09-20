@@ -1,0 +1,50 @@
+/* Design tokens — kept identical to the Figma file, the interactive prototype,
+   and the static HTML templates so all four stay visually consistent. */
+:root {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f5f6f8;
+  --color-bg-inverse: #111827;
+  --color-border: #d8dee4;
+  --color-text-primary: #1b1f23;
+  --color-text-secondary: #57606a;
+  --color-text-inverse: #ffffff;
+  --color-accent: #2f6feb;
+  --color-accent-soft: #e8f0fe;
+  --color-success: #1a7f37;
+  --color-success-soft: #dafbe1;
+  --color-warn: #9a6700;
+  --color-warn-soft: #fff8c5;
+  --color-danger: #cf222e;
+  --color-danger-soft: #ffebe9;
+  --color-guest: #8250df;
+  --color-guest-soft: #fbefff;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-full: 999px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg-primary: #14161a;
+    --color-bg-secondary: #1c1f26;
+    --color-bg-inverse: #f5f6f8;
+    --color-border: #2c313a;
+    --color-text-primary: #e8eaed;
+    --color-text-secondary: #9aa4af;
+    --color-text-inverse: #14161a;
+    --color-accent: #6ea8fe;
+    --color-accent-soft: #1c2a44;
+    --color-success: #57ab5a;
+    --color-success-soft: #142e18;
+    --color-warn: #d29922;
+    --color-warn-soft: #352a05;
+    --color-danger: #ff7b72;
+    --color-danger-soft: #3a1614;
+    --color-guest: #b083f0;
+    --color-guest-soft: #2a1c3a;
+  }
+}
