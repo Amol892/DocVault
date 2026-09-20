@@ -29,6 +29,7 @@ EXPECTED_TABLES = {
     "share_links",
     "share_link_access_logs",
     "activity_logs",
+    "revoked_tokens",
 }
 # tables that were deliberately removed from the design
 REMOVED_TABLES = {"auth_tokens"}
