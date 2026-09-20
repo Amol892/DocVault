@@ -2,7 +2,7 @@
 
 React + TypeScript single-page app for DocVault: sign in, switch between workspaces, browse and upload documents, share them by link, and manage members and roles.
 
-It is written against the API described in [PRD/10-api-specification.md](../PRD/10-api-specification.md). **The backend does not implement that API yet** (only `GET /health` exists), so today the screens cannot load real data. There is no mock mode.
+It is written against the API described in [PRD/10-api-specification.md](../PRD/10-api-specification.md). The backend implements **auth, workspaces and members** so far (sign up, sign in and out, workspaces, roles, removing members, ownership transfer); folders, documents, share links, invites and the activity log are still to come, so those screens cannot load real data yet. There is no mock mode.
 
 ## Stack
 
@@ -53,6 +53,8 @@ src/
 
 ## How it behaves
 
+- **Signing out revokes the token on the server** (`POST /auth/logout`), not just in the browser, so a copied token stops working immediately. The local session is cleared even if that call fails.
+- **The user's role comes from the workspace** (`my_role`), not from the member list, because Guests are not allowed to list members.
 - **Every API call goes through `src/api/client.ts`.** It attaches the token, turns error responses into `ApiClientError`, and on a `401` for a signed-in user drops the session and returns to the login page. Components never call `fetch` themselves.
 - **Failures are shown, not swallowed.** UI actions run through `useSafeAction`, which turns any error into a toast; pages that load data show an error state instead of an empty one.
 - **Uploads use a pre-signed URL:** request the URL, `PUT` the bytes straight to storage with the same `Content-Type` that was declared, then confirm. File bytes never pass through the API.
@@ -66,7 +68,7 @@ src/
 
 ## Tests
 
-`pnpm test` runs 44 tests: the permission rules, the API client (headers, error mapping, session expiry), the upload content-type rule, route protection, login, the role-dependent members page, the sidebar's per-user folder scoping, and the share-link modal. Vitest reads its settings from `vite.config.ts`; the jest-dom setup is `src/test/setup.ts`.
+`pnpm test` runs 54 tests: the permission rules, the API client (headers, error mapping, session expiry), the upload content-type rule, route protection, login, the role-dependent members page, the sidebar's per-user folder scoping, the share-link modal, sign-out, and the workspace context (including a Guest opening a workspace without the member list). Vitest reads its settings from `vite.config.ts`; the jest-dom setup is `src/test/setup.ts`.
 
 ## Not built yet
 

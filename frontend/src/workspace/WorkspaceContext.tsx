@@ -3,11 +3,12 @@ import type { Workspace, WorkspaceMember, Role } from "@/types";
 import { workspacesApi } from "@/api/workspaces";
 import { membersApi } from "@/api/members";
 import { errorMessage } from "@/api/client";
-import { useAuth } from "@/auth/AuthContext";
+import { can } from "@/permissions/roleHierarchy";
 
 interface WorkspaceContextValue {
   workspace: Workspace | null;
   members: WorkspaceMember[];
+  /** The signed-in user's role here, as reported by the API (works for Guests too). */
   myRole: Role | null;
   loading: boolean;
   /** Set when the workspace could not be loaded (not a member, deleted, network...). */
@@ -24,27 +25,29 @@ export function WorkspaceProvider({
   workspaceId: string;
   children: ReactNode;
 }) {
-  const { user } = useAuth();
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function refreshMembers() {
-    const list = await membersApi.list(workspaceId);
-    setMembers(list);
+    if (!workspace || !can(workspace.my_role, "SEE_MEMBER_LIST")) return;
+    setMembers(await membersApi.list(workspaceId));
   }
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([workspacesApi.get(workspaceId), membersApi.list(workspaceId)])
-      .then(([ws, mem]) => {
-        if (cancelled) return;
-        setWorkspace(ws);
-        setMembers(mem);
-      })
+    (async () => {
+      const ws = await workspacesApi.get(workspaceId);
+      // The role comes with the workspace. The member list is only fetched by roles allowed to
+      // see it: a Guest gets 403 there, and must still be able to open the workspace.
+      const list = can(ws.my_role, "SEE_MEMBER_LIST") ? await membersApi.list(workspaceId) : [];
+      if (cancelled) return;
+      setWorkspace(ws);
+      setMembers(list);
+    })()
       .catch((err: unknown) => {
         if (!cancelled) setError(errorMessage(err));
       })
@@ -56,11 +59,16 @@ export function WorkspaceProvider({
     };
   }, [workspaceId]);
 
-  const myRole = user ? (members.find((m) => m.user_id === user.id)?.role ?? null) : null;
-
   return (
     <WorkspaceContext.Provider
-      value={{ workspace, members, myRole, loading, error, refreshMembers }}
+      value={{
+        workspace,
+        members,
+        myRole: workspace?.my_role ?? null,
+        loading,
+        error,
+        refreshMembers,
+      }}
     >
       {children}
     </WorkspaceContext.Provider>

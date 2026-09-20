@@ -25,6 +25,8 @@ export interface Workspace {
   name: string;
   owner_id: string;
   created_at: string;
+  /** The caller's own role. Guests cannot list members, so this is how every role learns theirs. */
+  my_role: Role;
 }
 
 export interface WorkspaceMember {
