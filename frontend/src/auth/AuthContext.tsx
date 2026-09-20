@@ -48,8 +48,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await login(email, password);
   }
   function logout() {
-    authApi.logout();
+    // leave immediately; the token is revoked on the server in the background
     setUser(null);
+    void authApi.logout();
   }
 
   return (

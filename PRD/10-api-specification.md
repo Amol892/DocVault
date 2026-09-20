@@ -1,13 +1,13 @@
 # 10 — API Specification (frontend contract)
 
-> **Status: draft contract.** This is the REST API the React client in `frontend/` is written against. The backend does not implement it yet (only `GET /health` exists), so treat this file as the specification the backend tasks must satisfy, or amend it, in the same change as the client (`frontend/src/api/`, `frontend/src/types/index.ts`).
+> **Status.** Auth, Workspaces and Members are **implemented** (`backend/app/api/routes/`) and covered by tests. Invites, folders, documents, share links and activity are still a **draft contract**: the backend tasks must satisfy or amend them, in the same change as the client (`frontend/src/api/`, `frontend/src/types/index.ts`). Interactive docs: `/docs` on a running API.
 
 ## Conventions
 
 - **Base path:** `/api/v1`. In development the Vite server proxies `/api` to the API, so the backend must mount its routers under `/api/v1` (or the proxy must rewrite).
-- **Auth:** `Authorization: Bearer <JWT>` on every request except `POST /auth/register`, `POST /auth/login` and the public share endpoints. Tokens are short-lived (FR-3). A `401` on an authenticated request means the session is gone; the client drops it and returns to the login page.
+- **Auth:** `Authorization: Bearer <JWT>` on every request except `POST /auth/register` and `POST /auth/login` (and the public share endpoints, later). Access tokens are JWTs (HS256) that live **24 hours** (`JWT_EXPIRE_MINUTES`, default 1440). There is **no refresh flow**: expiry means signing in again. Every token has a unique `jti`; `POST /auth/logout` **revokes** it server-side (blacklist), so a leaked token can be killed before it expires. A `401` on an authenticated request means the session is gone; the client drops it and returns to the login page.
 - **Ids** are opaque 12-character strings (`RandomIdMixin`). Never assume a format, order or UUID.
-- **Errors:** every non-2xx response is `{ "error": { "code": "<STABLE_CODE>", "message": "<safe to show a user>" } }`. `message` must never leak whether a resource the caller cannot access exists: use `404` for both "missing" and "not yours" (PRD 06).
+- **Errors:** every non-2xx response, including validation errors and unknown routes, is `{ "error": { "code": "<STABLE_CODE>", "message": "<safe to show a user>" } }`. `message` never echoes request values (a rejected password is not repeated back) and never leaks whether a resource the caller cannot access exists: use `404` for both "missing" and "not yours" (PRD 06). Codes: `UNAUTHORIZED` (401, one message for a missing, malformed, expired, revoked or deactivated token), `BAD_CREDENTIALS` (401), `FORBIDDEN` (403), `CANNOT_MODIFY_OWNER` (403), `NOT_FOUND` (404), `EMAIL_TAKEN` (409), `TARGET_MUST_BE_ADMIN` (409), `VALIDATION_ERROR` (422), `METHOD_NOT_ALLOWED` (405), `INTERNAL_ERROR` (500).
 - **Authorization** is enforced by the server on every call (`api/deps.py`, PRD 06). The "Role" column below is the minimum role; the client hides controls accordingly but is never the enforcement point.
 - **Pagination:** `Paginated<T> = { items: T[], page: number, total: number }`, `page` starts at 1.
 - **Timestamps** are ISO 8601 UTC strings.
@@ -18,26 +18,29 @@
 
 | Method & path | Body → Response | Role |
 |---|---|---|
-| `POST /auth/register` | `{ email, password, name }` → `User` | public |
-| `POST /auth/login` | `{ email, password }` → `{ token, user: User }` | public |
+| `POST /auth/register` | `{ email, password (8-128 chars), name }` → 201 `User`. Emails are stored lower-cased; a duplicate (any case) is `409 EMAIL_TAKEN` | public |
+| `POST /auth/login` | `{ email, password }` → `{ token, user: User }`. A wrong password, an unknown email and a deactivated account give the identical `401 BAD_CREDENTIALS` | public |
+| `POST /auth/logout` | → 204. Revokes the token used for the call; afterwards that token gets `401` on every endpoint, and calling logout again with it is also `401`. The user's other tokens (other devices) stay valid | signed in |
 | `GET /auth/me` | → `User` | any signed-in user |
 
 Email verification and password reset (FR-1, FR-4) have no storage in the schema (removed by decision), so there are no endpoints for them yet.
+
+Revocation is stored in `revoked_tokens` (the token's `jti`, its owner and its own expiry). Rows are deleted once the token would have expired anyway. "Log out everywhere" (revoke all of a user's tokens) and revoking on password change are not built yet.
 
 ### Workspaces and members (FR-16..21)
 
 | Method & path | Body → Response | Role |
 |---|---|---|
 | `GET /workspaces` | → `WorkspaceSummary[]` (only workspaces the caller belongs to, FR-17) | any |
-| `POST /workspaces` | `{ name }` → `Workspace`; the caller becomes Owner | any |
-| `GET /workspaces/{id}` | → `Workspace` | member of it |
-| `DELETE /workspaces/{id}` | → 204 | Owner |
+| `POST /workspaces` | `{ name }` → 201 `Workspace`; the caller becomes Owner | any |
+| `GET /workspaces/{id}` | → `Workspace`, which includes **`my_role`** (the caller's own role: Guests cannot list members, so this is how every role learns theirs). `404` for a missing, deleted or not-yours workspace alike | member of it |
+| `DELETE /workspaces/{id}` | → 204. A **soft delete**: it then behaves as missing for everyone | Owner |
 | `GET /workspaces/{id}/members` | → `WorkspaceMember[]` (guests include `granted_folder_ids`) | Member+ |
-| `PATCH /workspaces/{id}/members/{userId}` | `{ role }` → 204 | Admin+ (never the Owner row) |
+| `PATCH /workspaces/{id}/members/{userId}` | `{ role: "admin" or "member" or "guest" }` → 204. `owner` is rejected (422): ownership only moves by transfer. Leaving `guest` clears the user's folder grants | Admin+ (never the Owner row: `403 CANNOT_MODIFY_OWNER`) |
 | `DELETE /workspaces/{id}/members/{userId}` | → 204; access is revoked immediately (FR-19) | Admin+ (never the Owner row) |
-| `POST /workspaces/{id}/members/{userId}/transfer-ownership` | → 204 | Owner |
-| `POST /workspaces/{id}/invites` | `{ email, role: "admin"\|"member"\|"guest" }` → `WorkspaceInvite` | Admin+ |
-| `POST /invites/{token}/accept` | → 204 | the invited user |
+| `POST /workspaces/{id}/members/{userId}/transfer-ownership` | → 204. The target must be an existing **Admin** (`409 TARGET_MUST_BE_ADMIN`); the Owner becomes an Admin in the same transaction, so there is always exactly one Owner | Owner |
+| `POST /workspaces/{id}/invites` | `{ email, role: "admin"\|"member"\|"guest" }` → `WorkspaceInvite` | Admin+ (**not implemented yet**) |
+| `POST /invites/{token}/accept` | → 204 | the invited user (**not implemented yet**) |
 
 A workspace always has exactly one Owner (FR-20); `role: "owner"` is never accepted by an invite or a role change.
 
