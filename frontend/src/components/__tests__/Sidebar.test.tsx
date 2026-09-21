@@ -1,38 +1,43 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Folder, Role, WorkspaceMember } from "@/types";
+import type { Folder, Role } from "@/types";
 import { Sidebar } from "../Sidebar";
 
 const FOLDERS: Folder[] = [
   { id: "f1", workspace_id: "w1", parent_folder_id: null, name: "Contracts" },
   { id: "f2", workspace_id: "w1", parent_folder_id: null, name: "Design" },
-  { id: "f3", workspace_id: "w1", parent_folder_id: null, name: "Payroll" },
 ];
 
-const state = vi.hoisted(() => ({
-  userId: "u2",
-  myRole: "guest" as string,
-  members: [] as unknown[],
-}));
+const state = vi.hoisted(() => ({ myRole: "member" as string, toast: vi.fn(), logout: vi.fn() }));
 
-vi.mock("@/auth/AuthContext", () => ({ useAuth: () => ({ user: { id: state.userId } }) }));
-vi.mock("@/workspace/WorkspaceContext", () => ({
-  useWorkspace: () => ({
-    workspace: { id: "w1", name: "Acme" },
-    myRole: state.myRole,
-    members: state.members,
+vi.mock("@/auth/AuthContext", () => ({
+  useAuth: () => ({
+    user: { id: "u1", name: "Ada", email: "ada@example.com" },
+    logout: state.logout,
   }),
 }));
-vi.mock("@/api/folders", () => ({ foldersApi: { list: vi.fn() } }));
 
+vi.mock("@/workspace/WorkspaceContext", () => ({
+  useWorkspace: () => ({ workspace: { id: "w1", name: "Acme" }, myRole: state.myRole }),
+}));
+const mockNavigate = vi.hoisted(() => vi.fn());
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router-dom")>()),
+  useNavigate: () => mockNavigate,
+}));
+vi.mock("@/hooks/useToast", () => ({ useToast: () => state.toast }));
+vi.mock("@/api/folders", () => ({
+  foldersApi: { list: vi.fn(), create: vi.fn(), rename: vi.fn(), delete: vi.fn() },
+}));
+
+import { ApiClientError } from "@/api/client";
 import { foldersApi } from "@/api/folders";
 
-function setup(userId: string, role: Role, members: WorkspaceMember[]) {
-  state.userId = userId;
+function setup(role: Role, folders: Folder[] = FOLDERS) {
   state.myRole = role;
-  state.members = members;
-  vi.mocked(foldersApi.list).mockResolvedValue(FOLDERS);
+  vi.mocked(foldersApi.list).mockResolvedValue(folders);
   return render(
     <MemoryRouter>
       <Sidebar workspaceId="w1" />
@@ -40,43 +45,162 @@ function setup(userId: string, role: Role, members: WorkspaceMember[]) {
   );
 }
 
-const guest = (id: string, granted: string[]): WorkspaceMember => ({
-  user_id: id,
-  name: id,
-  email: "",
-  role: "guest",
-  joined_at: "",
-  granted_folder_ids: granted,
-});
-
-describe("Sidebar folder scoping", () => {
+describe("Sidebar folder list", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
-  it("shows a guest ONLY their own granted folders, never another guest's", async () => {
-    // u1 (first guest in the list) was granted Contracts; the signed-in guest u2 only Design.
-    setup("u2", "guest", [guest("u1", ["f1"]), guest("u2", ["f2"])]);
+  it("shows exactly the folders the API returned, with no client-side filtering", async () => {
+    // the server already scoped a guest's list; the UI must not hide or add anything
+    setup("guest", [FOLDERS[1]]);
     expect(await screen.findByText("📁 Design")).toBeInTheDocument();
     expect(screen.queryByText("📁 Contracts")).not.toBeInTheDocument();
-    expect(screen.queryByText("📁 Payroll")).not.toBeInTheDocument();
   });
 
-  it("shows a guest with no grants no folders at all", async () => {
-    setup("u2", "guest", [guest("u2", [])]);
-    await screen.findByText("📄 All Documents");
-    expect(screen.queryByText(/📁/)).not.toBeInTheDocument();
-  });
-
-  it("shows every folder to a Member, plus the Members link; a Guest has no Members link", async () => {
-    const { unmount } = setup("u3", "member", []);
-    expect(await screen.findByText("📁 Payroll")).toBeInTheDocument();
-    expect(screen.getByText("📁 Contracts")).toBeInTheDocument();
-    expect(screen.getByText("👥 Members & Roles")).toBeInTheDocument();
-    unmount();
-
-    setup("u2", "guest", [guest("u2", ["f2"])]);
+  it("a guest gets no folder controls and no Members link", async () => {
+    setup("guest");
     await screen.findByText("📁 Design");
+    expect(screen.queryByText("+ New folder")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Rename Design")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Delete Design")).not.toBeInTheDocument();
     expect(screen.queryByText("👥 Members & Roles")).not.toBeInTheDocument();
+  });
+
+  it("a member gets folder controls and the Members link", async () => {
+    setup("member");
+    await screen.findByText("📁 Design");
+    expect(screen.getByText("+ New folder")).toBeInTheDocument();
+    expect(screen.getByLabelText("Rename Design")).toBeInTheDocument();
+    expect(screen.getByLabelText("Delete Design")).toBeInTheDocument();
+    expect(screen.getByText("👥 Members & Roles")).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar folder actions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  it("creates a folder and refreshes the list", async () => {
+    setup("member");
+    await screen.findByText("📁 Design");
+    vi.spyOn(window, "prompt").mockReturnValue("  Legal ");
+    vi.mocked(foldersApi.create).mockResolvedValue({
+      id: "f3",
+      workspace_id: "w1",
+      parent_folder_id: null,
+      name: "Legal",
+    });
+    vi.mocked(foldersApi.list).mockResolvedValue([
+      ...FOLDERS,
+      { id: "f3", workspace_id: "w1", parent_folder_id: null, name: "Legal" },
+    ]);
+
+    await userEvent.click(screen.getByText("+ New folder"));
+
+    expect(foldersApi.create).toHaveBeenCalledWith("w1", "Legal", null);
+    expect(await screen.findByText("📁 Legal")).toBeInTheDocument();
+  });
+
+  it("does nothing when the prompt is cancelled or left empty", async () => {
+    setup("member");
+    await screen.findByText("📁 Design");
+    const prompt = vi.spyOn(window, "prompt");
+    prompt.mockReturnValueOnce(null).mockReturnValueOnce("   ");
+    await userEvent.click(screen.getByText("+ New folder"));
+    await userEvent.click(screen.getByText("+ New folder"));
+    expect(foldersApi.create).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's message as a toast when the name is taken", async () => {
+    setup("member");
+    await screen.findByText("📁 Design");
+    vi.spyOn(window, "prompt").mockReturnValue("Design");
+    vi.mocked(foldersApi.create).mockRejectedValue(
+      new ApiClientError(409, "NAME_TAKEN", "A folder with this name already exists here."),
+    );
+
+    await userEvent.click(screen.getByText("+ New folder"));
+
+    await waitFor(() =>
+      expect(state.toast).toHaveBeenCalledWith("A folder with this name already exists here."),
+    );
+  });
+
+  it("renames a folder", async () => {
+    setup("member");
+    await screen.findByText("📁 Design");
+    vi.spyOn(window, "prompt").mockReturnValue("Brand");
+    vi.mocked(foldersApi.rename).mockResolvedValue({ ...FOLDERS[1], name: "Brand" });
+    vi.mocked(foldersApi.list).mockResolvedValue([FOLDERS[0], { ...FOLDERS[1], name: "Brand" }]);
+
+    await userEvent.click(screen.getByLabelText("Rename Design"));
+
+    expect(foldersApi.rename).toHaveBeenCalledWith("f2", "Brand");
+    expect(await screen.findByText("📁 Brand")).toBeInTheDocument();
+  });
+
+  it("deletes a folder only after confirmation", async () => {
+    setup("member");
+    await screen.findByText("📁 Design");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(screen.getByLabelText("Delete Design"));
+    expect(foldersApi.delete).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    vi.mocked(foldersApi.delete).mockResolvedValue(undefined);
+    vi.mocked(foldersApi.list).mockResolvedValue([FOLDERS[0]]);
+    await userEvent.click(screen.getByLabelText("Delete Design"));
+
+    expect(foldersApi.delete).toHaveBeenCalledWith("f2");
+    await waitFor(() => expect(screen.queryByText("📁 Design")).not.toBeInTheDocument());
+  });
+});
+
+describe("Sidebar workspace header", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  it("shows the workspace name as a label and a separate button back to all workspaces", async () => {
+    setup("member");
+    await screen.findByText("📄 All Documents");
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Acme/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /All workspaces/ }));
+    expect(mockNavigate).toHaveBeenCalledWith("/workspaces");
+  });
+});
+
+describe("Sidebar profile menu", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  it.each(["guest", "member", "owner"] as const)(
+    "%s sees their profile and can sign out",
+    async (role) => {
+      setup(role);
+      await screen.findByText("📄 All Documents");
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Profile menu" }));
+      expect(screen.getByText("ada@example.com")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+      expect(state.logout).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    },
+  );
+
+  it("closes the menu on Escape without signing out", async () => {
+    setup("member");
+    await screen.findByText("📄 All Documents");
+    await userEvent.click(screen.getByRole("button", { name: "Profile menu" }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(state.logout).not.toHaveBeenCalled();
   });
 });

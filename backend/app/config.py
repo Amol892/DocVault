@@ -22,14 +22,24 @@ class Settings(BaseSettings):
     s3_endpoint_url: str
     s3_access_key: str
     s3_secret_key: str
+    # Address the browser can reach, used to sign pre-signed URLs (signatures are host-bound).
+    # Defaults to s3_endpoint_url; in Docker they differ (storage:9000 vs localhost:9000).
+    s3_public_endpoint_url: str | None = None
+    s3_region: str = "us-east-1"
     s3_bucket: str = "docvault"
     storage_backend: str = "s3"  # s3 | local
+    upload_url_expire_seconds: int = Field(default=900, gt=0)
+    download_url_expire_seconds: int = Field(default=300, gt=0)
     # HS256 signing key: long enough that it cannot be brute-forced (>= 32 characters).
     jwt_secret: str = Field(min_length=32)
     # Access-token lifetime. There is no refresh flow, so expiry means logging in again.
     jwt_expire_minutes: int = Field(default=1440, gt=0)
     max_upload_mb: int = 100
     frontend_url: str = "http://localhost:5173"
+
+    @property
+    def s3_public_base(self) -> str:
+        return (self.s3_public_endpoint_url or self.s3_endpoint_url).rstrip("/")
 
 
 @lru_cache

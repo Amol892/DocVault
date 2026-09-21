@@ -14,5 +14,11 @@ class ErrorResponse(BaseModel):
     error: ErrorDetail
 
 
+class Paginated[T](BaseModel):
+    items: list[T]
+    page: int
+    total: int
+
+
 # the type FastAPI expects for a route's `responses=` argument
 Responses = dict[int | str, dict[str, Any]]

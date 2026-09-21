@@ -18,6 +18,7 @@ The PRD lives in `PRD/` (index: `PRD/README.md`). Read only the file relevant to
 - Migration: `uv run alembic revision --autogenerate -m "msg"` then `uv run alembic upgrade head` (revision files are only ever generated, never hand-edited)
 - Frontend (from `frontend/`, pnpm): `pnpm dev | pnpm test | pnpm lint | pnpm build` (build runs `tsc --noEmit`)
 - Backend tests use a REAL PostgreSQL: they create and use `<your database>_test` on the server `DATABASE_URL` points at (never the database itself; they refuse any name not ending in `_test`), apply the Alembic migrations to it, and empty it between tests. `DATABASE_URL` must be reachable; the API tests are in `backend/tests/`, named by risk area.
+- API tests use an in-memory fake `StorageBackend` (`tests/fake_storage.py`). `tests/test_storage_backends.py` runs the real S3 backend against MinIO in a `<bucket>-test` bucket and skips itself unless MinIO answers at `S3_ENDPOINT_URL` (`docker compose up -d storage` publishes port 9000; from the host use `S3_ENDPOINT_URL=http://127.0.0.1:9000`). Pre-signed URLs are signed for `S3_PUBLIC_ENDPOINT_URL` (the browser-reachable address); the API itself talks to `S3_ENDPOINT_URL`.
 
 ## Non-negotiable rules
 1. **Authorization lives in ONE place**: `backend/app/api/deps.py`. Never re-implement role/membership checks inside a route.

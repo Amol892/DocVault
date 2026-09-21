@@ -12,7 +12,7 @@ Every request touching a workspace goes through get_workspace_access():
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,8 +23,20 @@ from app.core.security import InvalidTokenError, TokenClaims, decode_access_toke
 from app.db.session import get_session
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
+from app.schemas.document import UploadUrlRequest
+from app.services.access import (
+    DocumentAccess,
+    FolderAccess,
+    ListScope,
+    UploadTarget,
+    WorkspaceAccess,
+    can_see_folder,
+    get_live_folder,
+    load_document_access,
+    load_folder_access,
+    load_workspace_access,
+)
 from app.services.accounts import is_token_revoked
-from app.services.workspaces import WorkspaceAccess
 
 # auto_error=False so a missing header becomes our own 401 in the standard error shape
 _bearer = HTTPBearer(auto_error=False)
@@ -97,3 +109,104 @@ def require(action: Action) -> Callable[..., Awaitable[WorkspaceAccess]]:
         return access
 
     return dependency
+
+
+async def get_folder_access(folder_id: str, user: CurrentUser, session: SessionDep) -> FolderAccess:
+    """404 for a missing or deleted folder, one in a workspace the caller is not in, and (for a
+    Guest) one they were not granted: all indistinguishable."""
+    access = await load_folder_access(session, user, folder_id)
+    if access is None:
+        raise not_found("Folder not found.")
+    return access
+
+
+def require_folder(action: Action) -> Callable[..., Awaitable[FolderAccess]]:
+    async def dependency(
+        access: Annotated[FolderAccess, Depends(get_folder_access)],
+    ) -> FolderAccess:
+        if not can(access.role, action):
+            raise forbidden()
+        return access
+
+    return dependency
+
+
+async def get_document_access(
+    document_id: str, user: CurrentUser, session: SessionDep
+) -> DocumentAccess:
+    """404 for a missing or deleted document, another user's personal document, one in a workspace
+    the caller is not in, and (for a Guest) one in a folder they were not granted."""
+    access = await load_document_access(session, user, document_id)
+    if access is None:
+        raise not_found("Document not found.")
+    return access
+
+
+def require_document(action: Action) -> Callable[..., Awaitable[DocumentAccess]]:
+    """The owner of a personal document may do anything to it; otherwise the workspace role must
+    allow `action`."""
+
+    async def dependency(
+        access: Annotated[DocumentAccess, Depends(get_document_access)],
+    ) -> DocumentAccess:
+        if not can(access.role, action):
+            raise forbidden()
+        return access
+
+    return dependency
+
+
+async def get_upload_target(
+    body: UploadUrlRequest, user: CurrentUser, session: SessionDep
+) -> UploadTarget:
+    """Who may upload where. A new version needs the same right as a new document."""
+    if body.document_id is not None:
+        existing = await load_document_access(session, user, body.document_id)
+        if existing is None:
+            raise not_found("Document not found.")
+        if not can(existing.role, Action.UPLOAD_DOCUMENT):
+            raise forbidden()
+        return UploadTarget(
+            user=user,
+            workspace=existing.workspace,
+            folder_id=existing.document.folder_id,
+            document=existing.document,
+        )
+    if body.workspace_id is None:  # a personal document; there are no personal folders
+        if body.folder_id is not None:
+            raise not_found("Folder not found.")
+        return UploadTarget(user=user, workspace=None, folder_id=None, document=None)
+    workspace = await load_workspace_access(session, user, body.workspace_id)
+    if workspace is None:
+        raise not_found("Workspace not found.")
+    if not can(workspace.role, Action.UPLOAD_DOCUMENT):
+        raise forbidden()
+    if body.folder_id is not None and (
+        await get_live_folder(session, workspace.workspace.id, body.folder_id) is None
+        or not await can_see_folder(session, workspace, body.folder_id)
+    ):
+        raise not_found("Folder not found.")
+    return UploadTarget(user=user, workspace=workspace, folder_id=body.folder_id, document=None)
+
+
+async def get_list_scope(
+    user: CurrentUser,
+    session: SessionDep,
+    workspace_id: Annotated[str | None, Query()] = None,
+    folder_id: Annotated[str | None, Query()] = None,
+) -> ListScope:
+    """No workspace = the caller's own personal documents. Otherwise membership is required, and a
+    named folder must exist and be visible to the caller."""
+    if workspace_id is None:
+        if folder_id is not None:
+            raise not_found("Folder not found.")
+        return ListScope(user=user, workspace=None, folder_id=None)
+    workspace = await load_workspace_access(session, user, workspace_id)
+    if workspace is None:
+        raise not_found("Workspace not found.")
+    if folder_id is not None and (
+        await get_live_folder(session, workspace.workspace.id, folder_id) is None
+        or not await can_see_folder(session, workspace, folder_id)
+    ):
+        raise not_found("Folder not found.")
+    return ListScope(user=user, workspace=workspace, folder_id=folder_id)

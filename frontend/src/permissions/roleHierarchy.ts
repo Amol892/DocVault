@@ -34,18 +34,7 @@ export function can(role: Role, action: keyof typeof ACTION_LEVEL): boolean {
   return hasLevel(role, ACTION_LEVEL[action]);
 }
 
-// Exception 1: Guest folder scoping — Member/Admin/Owner see the whole workspace;
-// Guest only sees folders explicitly in their grant list.
-export function guestCanSeeFolder(
-  role: Role,
-  folderId: string,
-  grantedFolderIds: string[] | undefined,
-): boolean {
-  if (role !== "guest") return true;
-  return (grantedFolderIds ?? []).includes(folderId);
-}
-
-// Exception 2: Owner-target protection — an Admin passes CHANGE_MEMBER_ROLE/REMOVE_MEMBER's
+// Owner-target protection — an Admin passes CHANGE_MEMBER_ROLE/REMOVE_MEMBER's
 // level check but must still be blocked from touching the Owner. Ownership only moves via
 // the explicit TRANSFER_OWNERSHIP action.
 export function canActOnMember(

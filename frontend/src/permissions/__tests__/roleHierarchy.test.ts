@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasLevel, can, guestCanSeeFolder, canActOnMember, roleLevel } from "../roleHierarchy";
+import { hasLevel, can, canActOnMember, roleLevel } from "../roleHierarchy";
 import type { Role } from "@/types";
 
 const ROLES: Role[] = ["owner", "admin", "member", "guest"];
@@ -39,17 +39,10 @@ describe("role hierarchy — inheritance actually holds", () => {
     expect(can("admin", "DELETE_WORKSPACE")).toBe(false);
   });
 
-  it("Guest passes the base view-level check but still needs a folder grant", () => {
+  it("Guest passes the base view-level check (folder scoping is the server's job)", () => {
     expect(hasLevel("guest", 1)).toBe(true);
-    expect(guestCanSeeFolder("guest", "f1", undefined)).toBe(false);
-    expect(guestCanSeeFolder("guest", "f1", ["f2"])).toBe(false);
-    expect(guestCanSeeFolder("guest", "f1", ["f1", "f2"])).toBe(true);
-  });
-
-  it("Member/Admin/Owner are never folder-scoped — guestCanSeeFolder always passes for them", () => {
-    expect(guestCanSeeFolder("member", "any-folder", undefined)).toBe(true);
-    expect(guestCanSeeFolder("admin", "any-folder", undefined)).toBe(true);
-    expect(guestCanSeeFolder("owner", "any-folder", undefined)).toBe(true);
+    expect(can("guest", "VIEW_GRANTED_DOCS")).toBe(true);
+    expect(can("guest", "CREATE_FOLDER")).toBe(false);
   });
 
   it("an Admin (level 3, passes CHANGE_MEMBER_ROLE's floor) is still blocked from acting on the Owner", () => {

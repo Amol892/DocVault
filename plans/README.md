@@ -6,3 +6,4 @@ One file per task, named `<DV-XX>-<slug>.md`. A plan is saved here only after it
 |---|---|
 | [DV-02 — Foundational project setup](DV-02-foundational-setup.md) | Implemented and verified |
 | [DV-05 — Backend API: auth, workspaces, members](DV-05-backend-auth-workspaces-members.md) | Implemented and verified |
+| [DV-06 — Backend API: folders, documents, object storage](DV-06-backend-folders-documents-storage.md) | Implemented and verified |

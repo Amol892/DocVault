@@ -4,6 +4,7 @@ import type { WorkspaceSummary } from "@/types";
 import { workspacesApi } from "@/api/workspaces";
 import { errorMessage } from "@/api/client";
 import { RoleBadge } from "@/components/RoleBadge";
+import { UserMenu } from "@/components/UserMenu";
 import { useToast } from "@/hooks/useToast";
 import { useSafeAction } from "@/hooks/useSafeAction";
 
@@ -48,6 +49,9 @@ export function WorkspaceSwitcherPage() {
       }}
     >
       <div style={{ maxWidth: 560, width: "100%" }}>
+        <div style={{ marginBottom: 16 }}>
+          <UserMenu />
+        </div>
         <div
           style={{
             display: "flex",

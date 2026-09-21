@@ -7,7 +7,7 @@ from app.core.permissions import Action
 from app.schemas.common import ErrorResponse, Responses
 from app.schemas.workspace import MemberOut, RoleChange
 from app.services import workspaces
-from app.services.workspaces import WorkspaceAccess
+from app.services.access import WorkspaceAccess
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/members", tags=["members"])
 

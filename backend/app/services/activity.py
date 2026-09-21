@@ -10,6 +10,8 @@ WORKSPACE_DELETED = "workspace.deleted"
 MEMBER_ROLE_CHANGED = "member.role_changed"
 MEMBER_REMOVED = "member.removed"
 OWNERSHIP_TRANSFERRED = "ownership.transferred"
+GUEST_FOLDER_GRANTED = "guest.folder_granted"
+GUEST_FOLDER_REVOKED = "guest.folder_revoked"
 
 
 def record_activity(
