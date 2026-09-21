@@ -1,40 +1,68 @@
 import { NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Folder } from "@/types";
 import { foldersApi } from "@/api/folders";
-import { useAuth } from "@/auth/AuthContext";
 import { useWorkspace } from "@/workspace/WorkspaceContext";
-import { can, guestCanSeeFolder } from "@/permissions/roleHierarchy";
+import { can } from "@/permissions/roleHierarchy";
 import { useSafeAction } from "@/hooks/useSafeAction";
+import { UserMenu } from "@/components/UserMenu";
 
-// FR-21: folder list is scoped by role. Member/Admin/Owner see every workspace folder; Guest
-// sees only folders in their own grant list. This mirrors (never replaces) the server-side
-// filtering the API already does.
+// FR-21: the API already scopes the folder list by role (a Guest only gets folders they were
+// granted), so this shows exactly what it returns. Member and above may create, rename and delete.
 export function Sidebar({ workspaceId }: { workspaceId: string }) {
-  const { user } = useAuth();
-  const { workspace, myRole, members } = useWorkspace();
+  const { workspace, myRole } = useWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
   const { folderId } = useParams();
   const safe = useSafeAction();
   const [folders, setFolders] = useState<Folder[]>([]);
 
+  const reload = useCallback(
+    () => safe(() => foldersApi.list(workspaceId)).then((res) => (res.ok ? res.value : null)),
+    [workspaceId, safe],
+  );
+
   useEffect(() => {
     let cancelled = false;
-    safe(() => foldersApi.list(workspaceId)).then((res) => {
-      if (!cancelled && res.ok) setFolders(res.value);
+    reload().then((list) => {
+      if (!cancelled && list) setFolders(list);
     });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, safe]);
+  }, [reload]);
 
-  // The grants that apply are the CURRENT USER's, found by user id (not by role: several members
-  // can share a role, and a guest must never be shown another guest's folders).
-  const me = members.find((m) => m.user_id === user?.id);
-  const visibleFolders = folders.filter((f) =>
-    myRole ? guestCanSeeFolder(myRole, f.id, me?.granted_folder_ids) : false,
-  );
+  const canManage = myRole ? can(myRole, "CREATE_FOLDER") : false;
+
+  async function refresh() {
+    const list = await reload();
+    if (list) setFolders(list);
+  }
+
+  async function createFolder() {
+    const name = window.prompt("Folder name")?.trim();
+    if (!name) return;
+    const res = await safe(() => foldersApi.create(workspaceId, name, null));
+    if (res.ok) await refresh();
+  }
+
+  async function renameFolder(folder: Folder) {
+    const name = window.prompt("Rename folder", folder.name)?.trim();
+    if (!name || name === folder.name) return;
+    const res = await safe(() => foldersApi.rename(folder.id, name));
+    if (res.ok) await refresh();
+  }
+
+  async function deleteFolder(folder: Folder) {
+    const ok = window.confirm(
+      `Delete "${folder.name}"? Everything inside moves up one level; nothing is lost.`,
+    );
+    if (!ok) return;
+    const res = await safe(() => foldersApi.delete(folder.id));
+    if (!res.ok) return;
+    if (folderId === folder.id) navigate(`/workspaces/${workspaceId}`);
+    await refresh();
+  }
 
   return (
     <div
@@ -51,34 +79,68 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
       <button
         onClick={() => navigate("/workspaces")}
         style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          padding: "9px 10px",
-          background: "var(--color-bg-primary)",
-          border: "1px solid var(--color-border)",
-          borderRadius: "var(--radius-md)",
-          fontSize: 13,
-          fontWeight: 600,
-          marginBottom: 12,
-          width: "100%",
+          background: "transparent",
+          border: "none",
+          padding: "2px 10px",
+          fontSize: 12,
+          textAlign: "left",
+          color: "var(--color-accent)",
         }}
       >
-        <span>{workspace?.name ?? "…"}</span>
-        <span>⌄</span>
+        ← All workspaces
       </button>
+      <div
+        title={workspace?.name}
+        style={{
+          padding: "6px 10px 12px",
+          fontSize: 15,
+          fontWeight: 600,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {workspace?.name ?? "…"}
+      </div>
 
       <SidebarLink to={`/workspaces/${workspaceId}`} active={!folderId} label="📄 All Documents" />
-      {visibleFolders.map((f) => (
-        <SidebarLink
-          key={f.id}
-          to={`/workspaces/${workspaceId}/folders/${f.id}`}
-          active={folderId === f.id}
-          label={`📁 ${f.name}`}
-          indent={!!f.parent_folder_id}
-        />
+      {folders.map((f) => (
+        <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SidebarLink
+              to={`/workspaces/${workspaceId}/folders/${f.id}`}
+              active={folderId === f.id}
+              label={`📁 ${f.name}`}
+              indent={!!f.parent_folder_id}
+            />
+          </div>
+          {canManage && (
+            <>
+              <IconButton label={`Rename ${f.name}`} onClick={() => renameFolder(f)}>
+                ✎
+              </IconButton>
+              <IconButton label={`Delete ${f.name}`} onClick={() => deleteFolder(f)}>
+                🗑
+              </IconButton>
+            </>
+          )}
+        </div>
       ))}
+      {canManage && (
+        <button
+          onClick={createFolder}
+          style={{
+            textAlign: "left",
+            padding: "7px 10px",
+            fontSize: 13,
+            color: "var(--color-accent)",
+            background: "transparent",
+            border: "none",
+          }}
+        >
+          + New folder
+        </button>
+      )}
 
       {myRole && can(myRole, "SEE_MEMBER_LIST") && (
         <>
@@ -101,21 +163,51 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
         </>
       )}
 
-      {myRole === "guest" && (
-        <div
-          style={{
-            marginTop: "auto",
-            background: "var(--color-guest-soft)",
-            color: "var(--color-guest)",
-            fontSize: 11,
-            padding: "8px 10px",
-            borderRadius: "var(--radius-sm)",
-          }}
-        >
-          You're a Guest here — you can only see folders that were shared with you.
-        </div>
-      )}
+      <div style={{ marginTop: "auto", display: "flex", flexDirection: "column" }}>
+        {myRole === "guest" && (
+          <div
+            style={{
+              marginBottom: 8,
+              background: "var(--color-guest-soft)",
+              color: "var(--color-guest)",
+              fontSize: 11,
+              padding: "8px 10px",
+              borderRadius: "var(--radius-sm)",
+            }}
+          >
+            You're a Guest here — you can only see folders that were shared with you.
+          </div>
+        )}
+        <UserMenu placement="up" />
+      </div>
     </div>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      style={{
+        background: "transparent",
+        border: "none",
+        fontSize: 12,
+        padding: "4px 5px",
+        color: "var(--color-text-secondary)",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

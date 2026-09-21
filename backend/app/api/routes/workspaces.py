@@ -8,7 +8,7 @@ from app.models.enums import WorkspaceRole
 from app.schemas.common import ErrorResponse, Responses
 from app.schemas.workspace import WorkspaceCreate, WorkspaceOut, WorkspaceSummaryOut
 from app.services import workspaces
-from app.services.workspaces import WorkspaceAccess
+from app.services.access import WorkspaceAccess
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 

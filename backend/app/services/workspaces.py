@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
@@ -11,19 +10,7 @@ from app.models.folder import FolderGrant
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.services import activity
-
-
-@dataclass(frozen=True)
-class WorkspaceAccess:
-    """The caller's standing in one workspace. Built only by api/deps.py."""
-
-    workspace: Workspace
-    membership: WorkspaceMember
-    user: User
-
-    @property
-    def role(self) -> WorkspaceRole:
-        return self.membership.role
+from app.services.access import WorkspaceAccess
 
 
 def _cannot_modify_owner() -> ApiError:

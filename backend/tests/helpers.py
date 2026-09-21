@@ -71,3 +71,59 @@ async def workspace_with_roles(
     await add_member(db, workspace["id"], users["member"], WorkspaceRole.MEMBER)
     await add_member(db, workspace["id"], users["guest"], WorkspaceRole.GUEST)
     return workspace, users
+
+
+async def make_folder(
+    client: AsyncClient,
+    user: TestUser,
+    workspace_id: str,
+    name: str,
+    parent_folder_id: str | None = None,
+) -> dict[str, Any]:
+    response = await client.post(
+        f"{API}/workspaces/{workspace_id}/folders",
+        json={"name": name, "parent_folder_id": parent_folder_id},
+        headers=user.headers,
+    )
+    assert response.status_code == 201, response.text
+    body: dict[str, Any] = response.json()
+    return body
+
+
+PDF = b"%PDF-1.7\n" + b"content " * 20
+
+
+async def upload_document(
+    client: AsyncClient,
+    storage: Any,
+    user: TestUser,
+    *,
+    workspace_id: str | None = None,
+    folder_id: str | None = None,
+    filename: str = "report.pdf",
+    mime_type: str = "application/pdf",
+    data: bytes = PDF,
+    document_id: str | None = None,
+) -> dict[str, Any]:
+    """The whole upload: ask for a URL, put the bytes there as the browser would, confirm."""
+    requested = await client.post(
+        f"{API}/documents/upload-url",
+        json={
+            "filename": filename,
+            "mime_type": mime_type,
+            "size_bytes": len(data),
+            "workspace_id": workspace_id,
+            "folder_id": folder_id,
+            "document_id": document_id,
+        },
+        headers=user.headers,
+    )
+    assert requested.status_code == 200, requested.text
+    granted = requested.json()
+    storage.put(granted["upload_url"], data)
+    confirmed = await client.post(
+        f"{API}/documents/{granted['document_id']}/confirm-upload", headers=user.headers
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    body: dict[str, Any] = confirmed.json()
+    return body

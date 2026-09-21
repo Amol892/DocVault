@@ -51,6 +51,8 @@ from alembic import command  # noqa: E402
 from app.config import BACKEND_DIR, Settings, get_settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import get_session  # noqa: E402
+from app.storage import get_storage  # noqa: E402
+from tests.fake_storage import FakeStorage  # noqa: E402
 
 
 def _test_database_url() -> URL:
@@ -138,14 +140,22 @@ def fast_password_hashing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def storage() -> FakeStorage:
+    return FakeStorage()
+
+
+@pytest.fixture
 async def client(
-    session_factory: async_sessionmaker[AsyncSession], fast_password_hashing: None
+    session_factory: async_sessionmaker[AsyncSession],
+    fast_password_hashing: None,
+    storage: FakeStorage,
 ) -> AsyncIterator[AsyncClient]:
     async def override_session() -> AsyncIterator[AsyncSession]:
         async with session_factory() as session:
             yield session
 
     app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_storage] = lambda: storage
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
