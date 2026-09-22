@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ApiError, not_found
 from app.core.permissions import Action, can_act_on_member
+from app.models.document import DocumentGrant
 from app.models.enums import WorkspaceRole
-from app.models.folder import FolderGrant
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.services import activity
@@ -66,7 +66,7 @@ async def soft_delete_workspace(session: AsyncSession, access: WorkspaceAccess) 
 async def list_members(
     session: AsyncSession, workspace_id: str
 ) -> list[tuple[WorkspaceMember, User, list[str] | None]]:
-    """Members with their user details; guests also carry the folder ids they were granted."""
+    """Members with their user details; guests also carry the document ids they were granted."""
     rows = (
         await session.execute(
             select(WorkspaceMember, User)
@@ -77,12 +77,12 @@ async def list_members(
     ).all()
     grants: dict[str, list[str]] = {}
     grant_rows = await session.execute(
-        select(FolderGrant.user_id, FolderGrant.folder_id)
-        .where(FolderGrant.workspace_id == workspace_id)
-        .order_by(FolderGrant.folder_id)
+        select(DocumentGrant.user_id, DocumentGrant.document_id)
+        .where(DocumentGrant.workspace_id == workspace_id)
+        .order_by(DocumentGrant.document_id)
     )
-    for user_id, folder_id in grant_rows.all():
-        grants.setdefault(user_id, []).append(folder_id)
+    for user_id, document_id in grant_rows.all():
+        grants.setdefault(user_id, []).append(document_id)
     return [
         (member, user, grants.get(user.id, []) if member.role == WorkspaceRole.GUEST else None)
         for member, user in rows
@@ -116,11 +116,11 @@ async def change_role(
         return
     target.role = new_role
     if old_role == WorkspaceRole.GUEST:
-        # folder grants only make sense for guests
+        # document grants only make sense for guests
         await session.execute(
-            delete(FolderGrant).where(
-                FolderGrant.workspace_id == access.workspace.id,
-                FolderGrant.user_id == target_user_id,
+            delete(DocumentGrant).where(
+                DocumentGrant.workspace_id == access.workspace.id,
+                DocumentGrant.user_id == target_user_id,
             )
         )
     activity.record_activity(
@@ -143,7 +143,7 @@ async def remove_member(
         raise _cannot_modify_owner()
     removed_role = target.role
     # the row is the whole revocation: access is derived from it on every request, and the
-    # composite FK cascades this user's folder grants away in the same statement
+    # composite FK cascades this user's document grants away in the same statement
     await session.delete(target)
     activity.record_activity(
         session,

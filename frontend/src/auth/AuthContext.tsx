@@ -9,6 +9,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => void;
+  /** re-read the user, e.g. after they confirmed their email in another tab */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -43,9 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
   async function register(email: string, password: string, name: string) {
     await authApi.register(email, password, name);
-    // Email verification is not part of the current design (its storage was removed from the
-    // schema by decision), so a new account signs in straight away.
+    // The account can sign in at once; until the emailed link is opened the API only answers the
+    // account endpoints, and ProtectedRoute shows the "confirm your email" screen.
     await login(email, password);
+  }
+  async function refreshUser() {
+    setUser(await authApi.me());
   }
   function logout() {
     // leave immediately; the token is revoked on the server in the background
@@ -54,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

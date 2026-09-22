@@ -69,15 +69,15 @@ class WorkspaceInvite(RandomIdMixin, TimestampMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class WorkspaceInviteFolder(RandomIdMixin, TimestampMixin, Base):
-    """Folders a Guest invite is granted on acceptance."""
+class WorkspaceInviteDocument(RandomIdMixin, TimestampMixin, Base):
+    """Documents a Guest invite is granted on acceptance (FR-21)."""
 
-    __tablename__ = "workspace_invite_folders"
+    __tablename__ = "workspace_invite_documents"
     __table_args__ = (
         UniqueConstraint(
-            "invite_id", "folder_id", name="uq_workspace_invite_folders_invite_id_folder_id"
+            "invite_id", "document_id", name="uq_workspace_invite_documents_invite_id_document_id"
         ),
     )
 
     invite_id: Mapped[str] = fk_column("workspace_invites.id", ondelete="CASCADE")
-    folder_id: Mapped[str] = fk_column("folders.id", ondelete="CASCADE", index=True)
+    document_id: Mapped[str] = fk_column("documents.id", ondelete="CASCADE", index=True)

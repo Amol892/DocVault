@@ -14,14 +14,10 @@ export const foldersApi = {
   rename(folderId: string, name: string): Promise<Folder> {
     return apiClient.patch<Folder>(`/folders/${folderId}`, { name });
   },
+  move(folderId: string, parentFolderId: string | null): Promise<Folder> {
+    return apiClient.patch<Folder>(`/folders/${folderId}`, { parent_folder_id: parentFolderId });
+  },
   delete(folderId: string): Promise<void> {
     return apiClient.delete(`/folders/${folderId}`);
-  },
-  // Guest-only scoping (folder_grants) — Admin/Owner manage this from the Members page.
-  grantAccess(folderId: string, userId: string): Promise<void> {
-    return apiClient.post(`/folders/${folderId}/grants`, { user_id: userId });
-  },
-  revokeAccess(folderId: string, userId: string): Promise<void> {
-    return apiClient.delete(`/folders/${folderId}/grants/${userId}`);
   },
 };

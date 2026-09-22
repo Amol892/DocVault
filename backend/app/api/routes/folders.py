@@ -6,7 +6,7 @@ from app.api.deps import SessionDep, get_workspace_access, require, require_fold
 from app.core.permissions import Action
 from app.models.folder import Folder
 from app.schemas.common import ErrorResponse, Responses
-from app.schemas.folder import FolderCreate, FolderOut, FolderRename, GrantCreate
+from app.schemas.folder import FolderCreate, FolderOut, FolderPatch
 from app.services import folders
 from app.services.access import FolderAccess, WorkspaceAccess
 
@@ -57,11 +57,14 @@ async def create_folder(
 
 @router.patch("/folders/{folder_id}", response_model=FolderOut, responses=_RESPONSES)
 async def rename_folder(
-    body: FolderRename,
+    body: FolderPatch,
     access: Annotated[FolderAccess, Depends(require_folder(Action.CREATE_FOLDER))],
     session: SessionDep,
 ) -> FolderOut:
-    return _out(await folders.rename_folder(session, access, body.name))
+    """Rename (`name`) or move (`parent_folder_id`, null = root); exactly one per request."""
+    if "name" in body.model_fields_set:
+        return _out(await folders.rename_folder(session, access, str(body.name)))
+    return _out(await folders.move_folder(session, access, body.parent_folder_id))
 
 
 @router.delete("/folders/{folder_id}", status_code=204, responses=_RESPONSES)
@@ -71,24 +74,4 @@ async def delete_folder(
 ) -> Response:
     """Soft delete. Sub-folders and documents move up a level; nothing inside is lost (FR-23)."""
     await folders.delete_folder(session, access)
-    return Response(status_code=204)
-
-
-@router.post("/folders/{folder_id}/grants", status_code=204, responses=_RESPONSES)
-async def grant_folder_access(
-    body: GrantCreate,
-    access: Annotated[FolderAccess, Depends(require_folder(Action.GRANT_FOLDER_ACCESS))],
-    session: SessionDep,
-) -> Response:
-    await folders.grant_access(session, access, body.user_id)
-    return Response(status_code=204)
-
-
-@router.delete("/folders/{folder_id}/grants/{user_id}", status_code=204, responses=_RESPONSES)
-async def revoke_folder_access(
-    user_id: str,
-    access: Annotated[FolderAccess, Depends(require_folder(Action.GRANT_FOLDER_ACCESS))],
-    session: SessionDep,
-) -> Response:
-    await folders.revoke_access(session, access, user_id)
     return Response(status_code=204)

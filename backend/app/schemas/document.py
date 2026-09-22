@@ -38,6 +38,11 @@ class DownloadUrlResponse(BaseModel):
     expires_in: int
 
 
+class PreviewUrlResponse(BaseModel):
+    preview_url: str
+    expires_in: int
+
+
 class DocumentPatch(BaseModel):
     """Exactly one of `filename` (rename) or `folder_id` (move; null = the workspace root)."""
 
@@ -68,3 +73,16 @@ class DocumentOut(BaseModel):
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class GrantCreate(BaseModel):
+    user_id: str
+
+
+class DocumentVersionOut(BaseModel):
+    version_number: int
+    size_bytes: int
+    mime_type: str
+    created_by_name: str
+    created_at: datetime
+    is_current: bool

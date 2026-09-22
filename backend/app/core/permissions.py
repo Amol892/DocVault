@@ -26,7 +26,7 @@ class Action(StrEnum):
     INVITE_MEMBER = "INVITE_MEMBER"
     CHANGE_MEMBER_ROLE = "CHANGE_MEMBER_ROLE"
     REMOVE_MEMBER = "REMOVE_MEMBER"
-    GRANT_FOLDER_ACCESS = "GRANT_FOLDER_ACCESS"
+    GRANT_DOCUMENT_ACCESS = "GRANT_DOCUMENT_ACCESS"
     VIEW_ACTIVITY_LOG = "VIEW_ACTIVITY_LOG"
     TRANSFER_OWNERSHIP = "TRANSFER_OWNERSHIP"
     DELETE_WORKSPACE = "DELETE_WORKSPACE"
@@ -34,7 +34,7 @@ class Action(StrEnum):
 
 # Minimum role level needed for each action.
 ACTION_LEVEL: dict[Action, int] = {
-    Action.VIEW_GRANTED_DOCS: 1,  # guest+ (still needs the folder-grant check separately)
+    Action.VIEW_GRANTED_DOCS: 1,  # guest+ (still needs the document-grant check separately)
     Action.UPLOAD_DOCUMENT: 2,
     Action.CREATE_FOLDER: 2,
     Action.CREATE_SHARE_LINK: 2,
@@ -42,7 +42,7 @@ ACTION_LEVEL: dict[Action, int] = {
     Action.INVITE_MEMBER: 3,
     Action.CHANGE_MEMBER_ROLE: 3,  # admin+, but never on the Owner (see can_act_on_member)
     Action.REMOVE_MEMBER: 3,  # admin+, but never on the Owner
-    Action.GRANT_FOLDER_ACCESS: 3,
+    Action.GRANT_DOCUMENT_ACCESS: 3,
     Action.VIEW_ACTIVITY_LOG: 3,
     Action.TRANSFER_OWNERSHIP: 4,  # owner only
     Action.DELETE_WORKSPACE: 4,  # owner only

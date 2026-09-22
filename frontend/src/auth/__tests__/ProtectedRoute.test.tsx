@@ -43,8 +43,19 @@ describe("ProtectedRoute", () => {
   });
 
   it("renders the page for a signed-in user", () => {
-    auth.value = { user: { id: "u1" }, loading: false };
+    auth.value = { user: { id: "u1", email_verified: true }, loading: false };
     renderAt("/private");
     expect(screen.getByText("secret")).toBeInTheDocument();
+  });
+
+  it("holds back the page until the email address is confirmed (FR-1)", () => {
+    auth.value = {
+      user: { id: "u1", email: "ana@acme.com", email_verified: false },
+      loading: false,
+    };
+    renderAt("/private");
+    expect(screen.queryByText("secret")).not.toBeInTheDocument();
+    expect(screen.getByText("Confirm your email address")).toBeInTheDocument();
+    expect(screen.getByText("ana@acme.com")).toBeInTheDocument();
   });
 });

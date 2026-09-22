@@ -81,29 +81,5 @@ async def test_a_name_clash_after_moving_up_is_resolved_not_lost(
     assert set(names.values()) == {None}
 
 
-async def test_deleting_a_granted_folder_removes_the_grant(
-    client: AsyncClient, db: AsyncSession, storage: FakeStorage
-) -> None:
-    workspace, users = await workspace_with_roles(client, db)
-    member, ws = users["member"], workspace["id"]
-    folder = await make_folder(client, member, ws, "Shared")
-    document = await upload_document(
-        client, storage, member, workspace_id=ws, folder_id=folder["id"]
-    )
-    await client.post(
-        f"{API}/folders/{folder['id']}/grants",
-        json={"user_id": users["guest"].id},
-        headers=users["admin"].headers,
-    )
-    await client.delete(f"{API}/folders/{folder['id']}", headers=member.headers)
-
-    guest = users["guest"].headers
-    assert (await client.get(f"{API}/workspaces/{ws}/folders", headers=guest)).json() == []
-    # the document moved to the root, where a guest sees nothing
-    assert (
-        await client.get(f"{API}/documents/{document['id']}/download-url", headers=guest)
-    ).status_code == 404
-    still_there = await client.get(
-        f"{API}/documents", params={"workspace_id": ws}, headers=member.headers
-    )
-    assert still_there.json()["total"] == 1
+# Guest document grants going away when their folder is deleted (they are folder-pinned, FR-21)
+# are covered in test_document_grants.py, alongside the rest of the grant behaviour.

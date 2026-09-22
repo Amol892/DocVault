@@ -34,10 +34,10 @@ def document_requests(
         ("PATCH", f"/documents/{document_id}", {"filename": "x.pdf"}),
         ("PATCH", f"/documents/{document_id}", {"folder_id": None}),
         ("DELETE", f"/documents/{document_id}", None),
+        ("POST", f"/documents/{document_id}/grants", {"user_id": "someone"}),
+        ("DELETE", f"/documents/{document_id}/grants/someone", None),
         ("PATCH", f"/folders/{folder_id}", {"name": "renamed"}),
         ("DELETE", f"/folders/{folder_id}", None),
-        ("POST", f"/folders/{folder_id}/grants", {"user_id": "someone"}),
-        ("DELETE", f"/folders/{folder_id}/grants/someone", None),
     ]
 
 
@@ -91,6 +91,12 @@ async def test_upload_of_a_new_version_to_a_hidden_document_is_404(
         assert response.status_code == 404
 
 
+async def grant(client: AsyncClient, actor: TestUser, document_id: str, user_id: str) -> Response:
+    return await client.post(
+        f"{API}/documents/{document_id}/grants", json={"user_id": user_id}, headers=actor.headers
+    )
+
+
 async def test_guest_with_a_grant_can_read_but_never_write(
     client: AsyncClient, db: AsyncSession, storage: FakeStorage
 ) -> None:
@@ -99,11 +105,7 @@ async def test_guest_with_a_grant_can_read_but_never_write(
     document = await upload_document(
         client, storage, users["member"], workspace_id=workspace["id"], folder_id=folder["id"]
     )
-    await client.post(
-        f"{API}/folders/{folder['id']}/grants",
-        json={"user_id": users["guest"].id},
-        headers=users["admin"].headers,
-    )
+    await grant(client, users["admin"], document["id"], users["guest"].id)
     guest = users["guest"]
 
     assert (
@@ -118,11 +120,14 @@ async def test_guest_with_a_grant_can_read_but_never_write(
         ("PATCH", f"/documents/{document['id']}", {"filename": "x.pdf"}),
         ("DELETE", f"/documents/{document['id']}", None),
         ("POST", f"/documents/{document['id']}/confirm-upload", None),
-        ("PATCH", f"/folders/{folder['id']}", {"name": "x"}),
-        ("POST", f"/folders/{folder['id']}/grants", {"user_id": guest.id}),
+        ("POST", f"/documents/{document['id']}/grants", {"user_id": guest.id}),
     ]
     for method, path, body in forbidden:
         assert (await call(client, guest, method, path, body)).status_code == 403, (method, path)
+    # a Guest has no standing on any folder at all (access is per document, FR-21) — 404, not 403
+    folder_patch = await call(client, guest, "PATCH", f"/folders/{folder['id']}", {"name": "x"})
+    assert folder_patch.status_code == 404
+
     version = await client.post(
         f"{API}/documents/upload-url",
         json={
@@ -148,27 +153,22 @@ async def test_guest_with_a_grant_can_read_but_never_write(
     assert new_in_folder.status_code == 403
 
 
-async def test_guest_sees_only_documents_in_granted_folders(
+async def test_guest_sees_only_individually_granted_documents(
     client: AsyncClient, db: AsyncSession, storage: FakeStorage
 ) -> None:
     workspace, users = await workspace_with_roles(client, db)
     member, ws = users["member"], workspace["id"]
-    granted = await make_folder(client, member, ws, "Granted")
-    child = await make_folder(client, member, ws, "Child", granted["id"])
-    other = await make_folder(client, member, ws, "Other")
+    folder = await make_folder(client, member, ws, "Folder")
     seen = [
-        await upload_document(client, storage, member, workspace_id=ws, folder_id=granted["id"]),
-        await upload_document(client, storage, member, workspace_id=ws, folder_id=child["id"]),
-    ]
-    hidden = [
-        await upload_document(client, storage, member, workspace_id=ws, folder_id=other["id"]),
+        await upload_document(client, storage, member, workspace_id=ws, folder_id=folder["id"]),
         await upload_document(client, storage, member, workspace_id=ws),  # workspace root
     ]
-    await client.post(
-        f"{API}/folders/{granted['id']}/grants",
-        json={"user_id": users["guest"].id},
-        headers=users["admin"].headers,
-    )
+    hidden = [
+        await upload_document(client, storage, member, workspace_id=ws, folder_id=folder["id"]),
+        await upload_document(client, storage, member, workspace_id=ws),
+    ]
+    for document in seen:
+        await grant(client, users["admin"], document["id"], users["guest"].id)
     guest = users["guest"]
 
     listed = await client.get(
@@ -179,12 +179,14 @@ async def test_guest_sees_only_documents_in_granted_folders(
     for document in hidden:
         response = await call(client, guest, "GET", f"/documents/{document['id']}/download-url")
         assert response.status_code == 404
-    other_folder = await client.get(
+    # a folder_id a guest sends is ignored, not a 404: they always get their flat granted set
+    scoped = await client.get(
         f"{API}/documents",
-        params={"workspace_id": ws, "folder_id": other["id"]},
+        params={"workspace_id": ws, "folder_id": folder["id"]},
         headers=guest.headers,
     )
-    assert other_folder.status_code == 404
+    assert scoped.status_code == 200
+    assert sorted(d["id"] for d in scoped.json()["items"]) == sorted(d["id"] for d in seen)
     searched = await client.get(
         f"{API}/documents", params={"workspace_id": ws, "q": "report"}, headers=guest.headers
     )
@@ -262,9 +264,9 @@ async def test_endpoints_need_a_token(client: AsyncClient) -> None:
         ("GET", "/documents/x/download-url"),
         ("PATCH", "/documents/x"),
         ("DELETE", "/documents/x"),
+        ("POST", "/documents/x/grants"),
+        ("DELETE", "/documents/x/grants/y"),
         ("PATCH", "/folders/x"),
         ("DELETE", "/folders/x"),
-        ("POST", "/folders/x/grants"),
-        ("DELETE", "/folders/x/grants/y"),
     ]:
         assert (await client.request(method, f"{API}{path}")).status_code == 401, (method, path)

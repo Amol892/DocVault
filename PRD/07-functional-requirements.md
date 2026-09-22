@@ -25,11 +25,11 @@ Each FR is independently implementable and testable. When asking an AI coding as
 
 ## Workspaces & Membership
 - **FR-16**: Any authenticated user can create a workspace and becomes its Owner.
-- **FR-17**: `GET /workspaces` returns only workspaces where the current user has a `workspace_members` row (owner/admin/member) or a `folder_grants`-implied guest presence — nothing else is visible or discoverable.
+- **FR-17**: `GET /workspaces` returns only workspaces where the current user has a `workspace_members` row (owner/admin/member/guest) — nothing else is visible or discoverable.
 - **FR-18**: Admins/Owners invite by email with a chosen role; invitees without an account sign up first, then accept.
 - **FR-19**: Removing a member immediately revokes their access to all workspace documents and folders.
 - **FR-20**: A workspace always has exactly one Owner; last-Owner removal/demotion is blocked until ownership is transferred.
-- **FR-21**: Guests are invited scoped to specific folders (`folder_grants`) and see only those folders.
+- **FR-21**: Guests are invited scoped to specific *documents* (`document_grants`) and see only those documents, in a flat list — they have no standing on folders at all. A grant is folder-pinned: moving a granted document to a different folder revokes it.
 
 ## Folders & Organization
 - **FR-22**: Create/rename/move/delete folders, nested via `parent_folder_id`.

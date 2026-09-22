@@ -35,8 +35,8 @@ class MemberOut(BaseModel):
     email: str
     role: WorkspaceRole
     joined_at: datetime
-    # Only present for guests: the folders they were granted (folder_grants)
-    granted_folder_ids: list[str] | None = None
+    # Only present for guests: the documents they were granted (document_grants, FR-21)
+    granted_document_ids: list[str] | None = None
 
 
 class RoleChange(BaseModel):

@@ -31,7 +31,7 @@ async def list_members(
             email=user.email,
             role=member.role,
             joined_at=member.created_at,
-            granted_folder_ids=granted,
+            granted_document_ids=granted,
         )
         for member, user, granted in rows
     ]

@@ -1,29 +1,34 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, and_, exists, func, or_, select
+from sqlalchemy import Select, and_, delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.errors import ApiError, not_found
-from app.models.document import Document, DocumentVersion
+from app.models.document import Document, DocumentGrant, DocumentVersion
 from app.models.enums import UploadStatus, WorkspaceRole
 from app.models.share_link import ShareLink
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
 from app.schemas.common import Paginated
 from app.schemas.document import (
     DocumentOut,
+    DocumentVersionOut,
     DownloadUrlResponse,
+    PreviewUrlResponse,
     UploadUrlRequest,
     UploadUrlResponse,
 )
+from app.services import activity
 from app.services.access import (
     DocumentAccess,
     ListScope,
     UploadTarget,
     get_live_folder,
-    guest_visible_folder_ids,
+    guest_visible_document_ids,
 )
+from app.services.preview import PREVIEWABLE
 from app.services.upload_validation import check_upload, normalize_mime
 from app.storage.base import StorageBackend
 
@@ -35,9 +40,10 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _documents_query() -> Select[Any]:
-    """Live documents that have a ready version, as rows of (document, current version, owner
-    name, has an active share link). The current version is the highest-numbered ready one."""
+def _documents_query(*, trashed: bool = False) -> Select[Any]:
+    """Live (or, with `trashed`, recently soft-deleted) documents that have a ready version, as
+    rows of (document, current version, owner name, has an active share link). The current
+    version is the highest-numbered ready one."""
     latest = (
         select(
             DocumentVersion.document_id.label("document_id"),
@@ -64,16 +70,21 @@ def _documents_query() -> Select[Any]:
             ),
         )
         .join(User, User.id == Document.owner_id)
-        .where(Document.deleted_at.is_(None))
+        .where(_trash_condition(now) if trashed else Document.deleted_at.is_(None))
     )
+
+
+def _trash_condition(now: datetime) -> Any:
+    cutoff = now - timedelta(days=get_settings().trash_grace_days)
+    return Document.deleted_at >= cutoff
 
 
 def _to_out(row: Any) -> DocumentOut:
     document, version, owner_name, is_public = row
-    if document.workspace_id is None:
-        visibility = "private"
+    if is_public:
+        visibility = "public"
     else:
-        visibility = "public" if is_public else "workspace"
+        visibility = "private" if document.workspace_id is None else "workspace"
     return DocumentOut(
         id=document.id,
         owner_id=document.owner_id,
@@ -90,29 +101,33 @@ def _to_out(row: Any) -> DocumentOut:
     )
 
 
-async def get_document_out(session: AsyncSession, document_id: str) -> DocumentOut:
+async def get_document_out(
+    session: AsyncSession, document_id: str, *, trashed: bool = False
+) -> DocumentOut:
     # the ORM identity map may hold stale copies from before a commit in this request
     session.expire_all()
-    row = (await session.execute(_documents_query().where(Document.id == document_id))).first()
+    query = _documents_query(trashed=trashed).where(Document.id == document_id)
+    row = (await session.execute(query)).first()
     if row is None:
         raise not_found("Document not found.")
     return _to_out(row)
 
 
 async def list_documents(
-    session: AsyncSession, scope: ListScope, q: str | None, page: int
+    session: AsyncSession, scope: ListScope, q: str | None, page: int, *, trashed: bool = False
 ) -> Paginated[DocumentOut]:
-    query = _documents_query()
+    query = _documents_query(trashed=trashed)
     if scope.workspace is None:
         query = query.where(Document.workspace_id.is_(None), Document.owner_id == scope.user.id)
     else:
         workspace_id = scope.workspace.workspace.id
         query = query.where(Document.workspace_id == workspace_id)
-        if scope.folder_id is not None:
+        if scope.workspace.role == WorkspaceRole.GUEST:
+            # flat set of exactly what was individually granted (FR-21) — never folder-scoped
+            visible = await guest_visible_document_ids(session, workspace_id, scope.user.id)
+            query = query.where(Document.id.in_(visible))
+        elif scope.folder_id is not None and not trashed:
             query = query.where(Document.folder_id == scope.folder_id)
-        elif scope.workspace.role == WorkspaceRole.GUEST:
-            visible = await guest_visible_folder_ids(session, workspace_id, scope.user.id)
-            query = query.where(Document.folder_id.in_(visible))
     if q and q.strip():
         pattern = f"%{_escape_like(q.strip().lower())}%"
         query = query.where(
@@ -125,7 +140,9 @@ async def list_documents(
         await session.execute(select(func.count()).select_from(query.order_by(None).subquery()))
     ).scalar_one()
     rows = await session.execute(
-        query.order_by(Document.created_at.desc(), Document.id)
+        query.order_by(
+            (Document.deleted_at if trashed else Document.created_at).desc(), Document.id
+        )
         .limit(PAGE_SIZE)
         .offset((page - 1) * PAGE_SIZE)
     )
@@ -269,6 +286,30 @@ async def download_url(
     return DownloadUrlResponse(download_url=url, expires_in=expires)
 
 
+async def preview_url(
+    session: AsyncSession, storage: StorageBackend, access: DocumentAccess
+) -> PreviewUrlResponse:
+    """An inline-rendering URL for logged-in viewing, for the common types a browser can safely
+    show without running anything from the file (same allowlist as the public share preview).
+    Anything else is only ever a download."""
+    document = access.document
+    version = await _latest_version(session, document.id, UploadStatus.READY)
+    if version is None:
+        raise not_found("Document not found.")
+    mime = version.mime_type or "application/octet-stream"
+    if mime not in PREVIEWABLE:
+        raise ApiError(415, "NOT_PREVIEWABLE", "This file type can't be previewed.")
+    expires = get_settings().download_url_expire_seconds
+    url = await storage.presign_download(
+        version.storage_key,
+        filename=document.filename,
+        content_type=mime,
+        expires_seconds=expires,
+        inline=True,
+    )
+    return PreviewUrlResponse(preview_url=url, expires_in=expires)
+
+
 async def rename_document(
     session: AsyncSession, access: DocumentAccess, filename: str
 ) -> DocumentOut:
@@ -289,6 +330,10 @@ async def move_document(
         )
         if not live:
             raise not_found("Folder not found.")
+    if document.folder_id != folder_id:
+        # grants are folder-pinned (FR-21): moving the document out of its granted folder
+        # revokes them, whether it moves into another folder or to the workspace root
+        await session.execute(delete(DocumentGrant).where(DocumentGrant.document_id == document.id))
     document.folder_id = folder_id
     await session.commit()
     return await get_document_out(session, document.id)
@@ -297,4 +342,146 @@ async def move_document(
 async def delete_document(session: AsyncSession, access: DocumentAccess) -> None:
     """Soft delete: the row and the stored objects stay for the grace period."""
     access.document.deleted_at = datetime.now(UTC)
+    await session.commit()
+
+
+async def restore_document(session: AsyncSession, access: DocumentAccess) -> DocumentOut:
+    """Bring a soft-deleted document back. If its folder was deleted meanwhile it returns to the
+    workspace root, so a restored document is never stranded in a folder nobody can open."""
+    document = access.document
+    cutoff = datetime.now(UTC) - timedelta(days=get_settings().trash_grace_days)
+    if document.deleted_at is None or document.deleted_at < cutoff:
+        raise not_found("Document not found.")
+    original_folder_id = document.folder_id
+    if document.folder_id is not None and (
+        document.workspace_id is None
+        or await get_live_folder(session, document.workspace_id, document.folder_id) is None
+    ):
+        document.folder_id = None
+    if document.folder_id != original_folder_id:
+        # its folder is gone, so it landed at the root: grants are folder-pinned (FR-21)
+        await session.execute(delete(DocumentGrant).where(DocumentGrant.document_id == document.id))
+    document.deleted_at = None
+    await session.commit()
+    return await get_document_out(session, document.id)
+
+
+async def list_versions(session: AsyncSession, access: DocumentAccess) -> list[DocumentVersionOut]:
+    """The confirmed versions, newest first. The first one is the current version."""
+    rows = (
+        await session.execute(
+            select(DocumentVersion, User.name)
+            .join(User, User.id == DocumentVersion.created_by)
+            .where(
+                DocumentVersion.document_id == access.document.id,
+                DocumentVersion.upload_status == UploadStatus.READY,
+            )
+            .order_by(DocumentVersion.version_number.desc())
+        )
+    ).all()
+    return [
+        DocumentVersionOut(
+            version_number=version.version_number,
+            size_bytes=version.size_bytes or 0,
+            mime_type=version.mime_type or "application/octet-stream",
+            created_by_name=name,
+            created_at=version.created_at,
+            is_current=index == 0,
+        )
+        for index, (version, name) in enumerate(rows)
+    ]
+
+
+async def version_download_url(
+    session: AsyncSession, storage: StorageBackend, access: DocumentAccess, version_number: int
+) -> DownloadUrlResponse:
+    version = (
+        await session.execute(
+            select(DocumentVersion).where(
+                DocumentVersion.document_id == access.document.id,
+                DocumentVersion.version_number == version_number,
+                DocumentVersion.upload_status == UploadStatus.READY,
+            )
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        raise not_found("Version not found.")
+    expires = get_settings().download_url_expire_seconds
+    url = await storage.presign_download(
+        version.storage_key,
+        filename=access.document.filename,
+        content_type=version.mime_type or "application/octet-stream",
+        expires_seconds=expires,
+    )
+    return DownloadUrlResponse(download_url=url, expires_in=expires)
+
+
+async def grant_document(
+    session: AsyncSession, access: DocumentAccess, target_user_id: str
+) -> None:
+    """Give a Guest access to this one document (FR-21). Idempotent."""
+    if access.workspace is None:  # personal documents have no workspace, so no Guests either
+        raise not_found("Document not found.")
+    workspace_id = access.workspace.workspace.id
+    member = (
+        await session.execute(
+            select(WorkspaceMember).where(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.user_id == target_user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        raise not_found("Member not found.")
+    if member.role != WorkspaceRole.GUEST:
+        raise ApiError(409, "NOT_A_GUEST", "Only guests are given access to individual documents.")
+
+    existing = await session.execute(
+        select(DocumentGrant.id).where(
+            DocumentGrant.document_id == access.document.id, DocumentGrant.user_id == target_user_id
+        )
+    )
+    if existing.first() is not None:
+        return
+    session.add(
+        DocumentGrant(
+            workspace_id=workspace_id,
+            document_id=access.document.id,
+            user_id=target_user_id,
+            granted_by=access.user.id,
+        )
+    )
+    activity.record_activity(
+        session,
+        workspace_id=workspace_id,
+        actor_id=access.user.id,
+        action=activity.GUEST_DOCUMENT_GRANTED,
+        target_type="user",
+        target_id=target_user_id,
+        metadata={"document_id": access.document.id},
+    )
+    await session.commit()
+
+
+async def revoke_document(
+    session: AsyncSession, access: DocumentAccess, target_user_id: str
+) -> None:
+    """Take a Guest's access to this document away, effective on their next request. Idempotent."""
+    if access.workspace is None:
+        raise not_found("Document not found.")
+    result = await session.execute(
+        delete(DocumentGrant).where(
+            DocumentGrant.document_id == access.document.id, DocumentGrant.user_id == target_user_id
+        )
+    )
+    if result.rowcount:  # type: ignore[attr-defined]
+        activity.record_activity(
+            session,
+            workspace_id=access.workspace.workspace.id,
+            actor_id=access.user.id,
+            action=activity.GUEST_DOCUMENT_REVOKED,
+            target_type="user",
+            target_id=target_user_id,
+            metadata={"document_id": access.document.id},
+        )
     await session.commit()

@@ -141,3 +141,23 @@ async def test_urls_are_signed_for_the_public_endpoint() -> None:
     signed = query["X-Amz-SignedHeaders"][0].split(";")
     assert "content-type" in signed and "content-length" in signed
     assert backend.object_url("k/1") == f"{settings.s3_endpoint_url.rstrip('/')}/any/k/1"
+
+
+async def test_inline_download_url_renders_in_the_browser(backend: S3Backend) -> None:
+    key, data = _key(), b"%PDF-1.7\npreview me"
+    upload = await backend.presign_upload(
+        key, content_type="application/pdf", size_bytes=len(data), expires_seconds=60
+    )
+    async with httpx.AsyncClient() as http:
+        await http.put(upload, content=data, headers={"Content-Type": "application/pdf"})
+        url = await backend.presign_download(
+            key,
+            filename="p.pdf",
+            content_type="application/pdf",
+            expires_seconds=60,
+            inline=True,
+        )
+        response = await http.get(url)
+    assert response.status_code == 200 and response.content == data
+    assert response.headers["content-disposition"].startswith("inline")
+    await backend.delete(key)

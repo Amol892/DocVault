@@ -1,0 +1,11 @@
+{% extends "_layout.html" %}
+{% from "_button.html" import button %}
+{% block body %}
+<p>Hi {{ name }},</p>
+<p>Confirm your email address to finish setting up your DocVault account.</p>
+{{ button(url, "Confirm email address") }}
+<p style="color:#6b7280;font-size:12px;">
+  This link works once and expires in {{ expire_hours }} hours. If you didn't create a DocVault
+  account, you can ignore this email.
+</p>
+{% endblock %}

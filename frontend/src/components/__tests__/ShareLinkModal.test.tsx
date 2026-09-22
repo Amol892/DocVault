@@ -4,7 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Document, ShareLink } from "@/types";
 import { ShareLinkModal } from "../ShareLinkModal";
 
-const shareLinksApi = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), revoke: vi.fn() }));
+const shareLinksApi = vi.hoisted(() => ({
+  list: vi.fn(),
+  create: vi.fn(),
+  revoke: vi.fn(),
+  accessLog: vi.fn(),
+  updateAllowDownload: vi.fn(),
+}));
 vi.mock("@/api/shareLinks", () => ({ shareLinksApi }));
 
 const DOC = { id: "d1", filename: "plan.pdf" } as Document;
@@ -15,6 +21,7 @@ const ACTIVE: ShareLink = {
   allow_download: true,
   has_password: false,
   expires_at: null,
+  expired: false,
   revoked_at: null,
   created_at: "2026-09-01T00:00:00Z",
 };
@@ -29,6 +36,7 @@ function open(onVisibilityChanged = vi.fn()) {
 describe("ShareLinkModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    shareLinksApi.accessLog.mockResolvedValue({ items: [], page: 1, total: 0 });
   });
 
   it("does not pretend it can show the address of an existing link (only a hash is stored)", async () => {
@@ -86,5 +94,53 @@ describe("ShareLinkModal", () => {
 
     expect(changed).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Revoke link" })).toBeInTheDocument();
+  });
+
+  it("treats an expired link as no active link, so a new one can be generated", async () => {
+    shareLinksApi.list.mockResolvedValue([{ ...ACTIVE, expired: true }]);
+    open();
+    expect(await screen.findByRole("button", { name: "Generate link" })).toBeInTheDocument();
+  });
+
+  it("shows who recently opened the active link", async () => {
+    shareLinksApi.list.mockResolvedValue([ACTIVE]);
+    shareLinksApi.accessLog.mockResolvedValue({
+      items: [
+        {
+          accessed_at: "2026-09-21T10:00:00Z",
+          ip_address: "203.0.113.7",
+          user_agent: "x",
+          outcome: "bad_password",
+        },
+      ],
+      page: 1,
+      total: 1,
+    });
+    open();
+    expect(await screen.findByText(/203\.0\.113\.7/)).toBeInTheDocument();
+    expect(screen.getByText("bad password")).toBeInTheDocument();
+  });
+
+  it("toggles allow-download on an existing link without recreating it", async () => {
+    shareLinksApi.list.mockResolvedValue([ACTIVE]);
+    shareLinksApi.updateAllowDownload.mockResolvedValue({ ...ACTIVE, allow_download: false });
+    open();
+    const toggle = await screen.findByRole("switch", { name: "Allow download" });
+    expect(toggle).toBeEnabled();
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await userEvent.click(toggle);
+
+    expect(shareLinksApi.updateAllowDownload).toHaveBeenCalledWith("l1", false);
+    expect(shareLinksApi.create).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+  });
+
+  it("the other options stay locked once a link exists", async () => {
+    shareLinksApi.list.mockResolvedValue([ACTIVE]);
+    open();
+    await screen.findByRole("switch", { name: "Allow download" });
+    expect(screen.getByRole("switch", { name: "Require password" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Set expiry (30 days)" })).toBeDisabled();
   });
 });

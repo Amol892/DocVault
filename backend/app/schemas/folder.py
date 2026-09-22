@@ -1,7 +1,7 @@
 import re
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import AfterValidator, BaseModel, StringConstraints
+from pydantic import AfterValidator, BaseModel, StringConstraints, model_validator
 
 _FORBIDDEN = re.compile(r"[/\\\x00-\x1f\x7f]")
 
@@ -25,8 +25,20 @@ class FolderCreate(BaseModel):
     parent_folder_id: str | None = None
 
 
-class FolderRename(BaseModel):
-    name: EntryName
+class FolderPatch(BaseModel):
+    """Exactly one of `name` (rename) or `parent_folder_id` (move; null = the workspace root)."""
+
+    name: EntryName | None = None
+    parent_folder_id: str | None = None
+
+    @model_validator(mode="after")
+    def exactly_one_field(self) -> Self:
+        provided = self.model_fields_set & {"name", "parent_folder_id"}
+        if len(provided) != 1:
+            raise ValueError("send exactly one of name or parent_folder_id")
+        if "name" in provided and self.name is None:
+            raise ValueError("name must not be null")
+        return self
 
 
 class FolderOut(BaseModel):
@@ -34,7 +46,3 @@ class FolderOut(BaseModel):
     workspace_id: str | None
     parent_folder_id: str | None
     name: str
-
-
-class GrantCreate(BaseModel):
-    user_id: str

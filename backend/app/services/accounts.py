@@ -3,6 +3,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.errors import ApiError
 from app.core.security import TokenClaims, hash_password, verify_password
 from app.models.revoked_token import RevokedToken
@@ -21,7 +22,13 @@ async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
 async def register_user(session: AsyncSession, *, email: str, password: str, name: str) -> User:
     if await get_user_by_email(session, email) is not None:
         raise _email_taken()
-    user = User(email=email, password_hash=hash_password(password), name=name)
+    user = User(
+        email=email,
+        password_hash=hash_password(password),
+        name=name,
+        # FR-1: unverified until the emailed link is opened (unless verification is switched off)
+        email_verified=not get_settings().require_email_verification,
+    )
     session.add(user)
     try:
         await session.commit()

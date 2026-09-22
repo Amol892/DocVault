@@ -1,11 +1,14 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { safeNextPath } from "@/auth/nextPath";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiClientError } from "@/api/client";
 
 export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = safeNextPath(params.get("next"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +20,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate("/workspaces");
+      navigate(next ?? "/workspaces");
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -86,7 +89,13 @@ export function LoginPage() {
           {submitting ? "Logging in…" : "Log In"}
         </button>
         <Link
-          to="/signup"
+          to="/forgot-password"
+          style={{ display: "block", textAlign: "center", fontSize: 12, marginTop: 14 }}
+        >
+          Forgot your password?
+        </Link>
+        <Link
+          to={`/signup${next ? `?next=${encodeURIComponent(next)}` : ""}`}
           style={{ display: "block", textAlign: "center", fontSize: 12, marginTop: 14 }}
         >
           Don't have an account? Sign up

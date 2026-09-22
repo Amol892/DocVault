@@ -132,17 +132,14 @@ async def test_rename(client: AsyncClient, db: AsyncSession) -> None:
 
 
 async def test_guest_cannot_rename_or_delete(client: AsyncClient, db: AsyncSession) -> None:
+    """Guests have no standing on any folder (FR-21: access is per document, not per folder), so
+    this is a 404 like any folder they were never near, not a 403."""
     workspace, users = await workspace_with_roles(client, db)
     folder = await make_folder(client, users["member"], workspace["id"], "Docs")
-    await client.post(
-        f"{API}/folders/{folder['id']}/grants",
-        json={"user_id": users["guest"].id},
-        headers=users["admin"].headers,
-    )
     guest = users["guest"].headers
     renamed = await client.patch(f"{API}/folders/{folder['id']}", json={"name": "x"}, headers=guest)
-    assert renamed.status_code == 403
-    assert (await client.delete(f"{API}/folders/{folder['id']}", headers=guest)).status_code == 403
+    assert renamed.status_code == 404
+    assert (await client.delete(f"{API}/folders/{folder['id']}", headers=guest)).status_code == 404
 
 
 async def test_delete_hides_the_folder(client: AsyncClient, db: AsyncSession) -> None:

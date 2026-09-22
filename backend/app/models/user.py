@@ -14,6 +14,9 @@ class User(RandomIdMixin, TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(String(200))
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))
+    # FR-1. The default is true so accounts that existed before verification was added stay
+    # usable; registration sets it explicitly (false until the emailed link is opened).
+    email_verified: Mapped[bool] = mapped_column(server_default=text("true"))
 
 
 # Case-insensitive unique email (no citext extension needed); the app lower-cases on write.

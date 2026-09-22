@@ -29,7 +29,13 @@ vi.mock("react-router-dom", async (importOriginal) => ({
 }));
 vi.mock("@/hooks/useToast", () => ({ useToast: () => state.toast }));
 vi.mock("@/api/folders", () => ({
-  foldersApi: { list: vi.fn(), create: vi.fn(), rename: vi.fn(), delete: vi.fn() },
+  foldersApi: {
+    list: vi.fn(),
+    create: vi.fn(),
+    rename: vi.fn(),
+    delete: vi.fn(),
+    move: vi.fn(),
+  },
 }));
 
 import { ApiClientError } from "@/api/client";
@@ -202,5 +208,51 @@ describe("Sidebar profile menu", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(state.logout).not.toHaveBeenCalled();
+  });
+});
+
+describe("Sidebar nested folders and trash", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  it("creates a subfolder inside the chosen folder", async () => {
+    setup("member");
+    await screen.findByText("📁 Design");
+    vi.spyOn(window, "prompt").mockReturnValue("Icons");
+    vi.mocked(foldersApi.create).mockResolvedValue({
+      id: "f9",
+      workspace_id: "w1",
+      parent_folder_id: "f2",
+      name: "Icons",
+    });
+    await userEvent.click(screen.getByLabelText("New folder in Design"));
+    expect(foldersApi.create).toHaveBeenCalledWith("w1", "Icons", "f2");
+  });
+
+  it("moves a folder, offering neither itself nor its descendants as a target", async () => {
+    setup("member", [
+      ...FOLDERS,
+      { id: "f3", workspace_id: "w1", parent_folder_id: "f2", name: "Icons" },
+    ]);
+    await screen.findByText("📁 Design");
+    vi.mocked(foldersApi.move).mockResolvedValue(FOLDERS[1]);
+    await userEvent.click(screen.getByLabelText("Move Design"));
+    const select = await screen.findByLabelText("Destination folder");
+    const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
+    expect(options).toEqual(["Workspace root", "Contracts"]);
+    await userEvent.selectOptions(select, "f1");
+    await userEvent.click(screen.getByRole("button", { name: "Move here" }));
+    expect(foldersApi.move).toHaveBeenCalledWith("f2", "f1");
+  });
+
+  it("links to the trash for members and not for guests", async () => {
+    const { unmount } = setup("member");
+    expect(await screen.findByText("🗑 Trash")).toBeInTheDocument();
+    unmount();
+    setup("guest");
+    await screen.findByText("📄 All Documents");
+    expect(screen.queryByText("🗑 Trash")).not.toBeInTheDocument();
   });
 });

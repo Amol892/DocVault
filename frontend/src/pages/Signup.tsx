@@ -1,11 +1,14 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { safeNextPath } from "@/auth/nextPath";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiClientError } from "@/api/client";
 
 export function SignupPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = safeNextPath(params.get("next"));
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,7 +21,7 @@ export function SignupPage() {
     setSubmitting(true);
     try {
       await register(email, password, name);
-      navigate("/workspaces");
+      navigate(next ?? "/workspaces");
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Something went wrong. Try again.");
     } finally {
@@ -99,7 +102,7 @@ export function SignupPage() {
           {submitting ? "Creating account…" : "Create account"}
         </button>
         <Link
-          to="/login"
+          to={`/login${next ? `?next=${encodeURIComponent(next)}` : ""}`}
           style={{ display: "block", textAlign: "center", fontSize: 12, marginTop: 14 }}
         >
           Already have an account? Log in

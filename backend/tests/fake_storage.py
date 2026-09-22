@@ -20,9 +20,15 @@ class FakeStorage:
         )
 
     async def presign_download(
-        self, key: str, *, filename: str, content_type: str, expires_seconds: int
+        self,
+        key: str,
+        *,
+        filename: str,
+        content_type: str,
+        expires_seconds: int,
+        inline: bool = False,
     ) -> str:
-        disposition = quote(content_disposition(filename), safe="")
+        disposition = quote(content_disposition(filename, inline=inline), safe="")
         return (
             f"http://storage.test/{quote(key)}?op=get&disposition={disposition}"
             f"&expires={expires_seconds}"

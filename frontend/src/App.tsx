@@ -9,6 +9,13 @@ import { SignupPage } from "@/pages/Signup";
 import { WorkspaceSwitcherPage } from "@/pages/WorkspaceSwitcher";
 import { DashboardPage } from "@/pages/Dashboard";
 import { MembersRolesPage } from "@/pages/MembersRoles";
+import { ActivityPage } from "@/pages/Activity";
+import { TrashPage } from "@/pages/Trash";
+import { SharedDocumentPage } from "@/pages/SharedDocument";
+import { AcceptInvitePage } from "@/pages/AcceptInvite";
+import { VerifyEmailPage } from "@/pages/VerifyEmail";
+import { ForgotPasswordPage } from "@/pages/ForgotPassword";
+import { ResetPasswordPage } from "@/pages/ResetPassword";
 
 // Holds back the page until the workspace and the user's role are known, so no screen ever
 // flashes the wrong permissions while loading, and a failed load shows a reason and a way out.
@@ -53,6 +60,12 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            {/* public: a share link works without an account (FR-11) */}
+            <Route path="/s/:token" element={<SharedDocumentPage />} />
+            <Route path="/invites/:token" element={<AcceptInvitePage />} />
+            <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
 
             <Route
               path="/workspaces"
@@ -70,6 +83,12 @@ export default function App() {
             <Route
               path="/workspaces/:workspaceId/members"
               element={inWorkspace(<MembersRolesPage />)}
+            />
+
+            <Route path="/workspaces/:workspaceId/trash" element={inWorkspace(<TrashPage />)} />
+            <Route
+              path="/workspaces/:workspaceId/activity"
+              element={inWorkspace(<ActivityPage />)}
             />
 
             <Route path="/" element={<Navigate to="/workspaces" replace />} />

@@ -21,18 +21,17 @@ EXPECTED_TABLES = {
     "workspaces",
     "workspace_members",
     "workspace_invites",
-    "workspace_invite_folders",
+    "workspace_invite_documents",
     "folders",
-    "folder_grants",
     "documents",
+    "document_grants",
     "document_versions",
     "share_links",
     "share_link_access_logs",
     "activity_logs",
     "revoked_tokens",
+    "auth_tokens",
 }
-# tables that were deliberately removed from the design
-REMOVED_TABLES = {"auth_tokens"}
 
 
 def tables() -> list[Table]:
@@ -42,7 +41,6 @@ def tables() -> list[Table]:
 def test_all_expected_tables_are_registered() -> None:
     names = {t.name for t in tables()}
     assert names == EXPECTED_TABLES
-    assert not names & REMOVED_TABLES
 
 
 @pytest.mark.parametrize("table", tables(), ids=lambda t: t.name)
@@ -62,7 +60,9 @@ def test_every_table_inherits_both_mixins(table: Table) -> None:
 
 
 def test_removed_columns_are_absent() -> None:
+    # verification is a single flag; who verified when is not recorded
     assert "email_verified_at" not in Base.metadata.tables["users"].c
+    assert "email_verified" in Base.metadata.tables["users"].c
     # the current version is the latest version_number; there is no back-reference column
     assert "current_version_id" not in Base.metadata.tables["documents"].c
     assert "storage_key" not in Base.metadata.tables["documents"].c
@@ -103,6 +103,7 @@ def test_enums_hold_the_design_values() -> None:
         ("workspace_members", "role"): ["owner", "admin", "member", "guest"],
         ("document_versions", "upload_status"): ["pending", "ready", "rejected"],
         ("share_link_access_logs", "outcome"): ["ok", "bad_password", "expired", "revoked"],
+        ("auth_tokens", "purpose"): ["verify_email", "reset_password"],
     }
 
 
@@ -161,9 +162,9 @@ def test_ddl_compiles_for_postgresql_with_expected_indexes() -> None:
     # composite foreign keys with cascading revocation
     assert (
         "FOREIGN KEY(workspace_id, user_id) REFERENCES workspace_members (workspace_id, user_id)"
-        in ddl["folder_grants"]
+        in ddl["document_grants"]
     )
-    assert "ON DELETE CASCADE" in ddl["folder_grants"]
+    assert "ON DELETE CASCADE" in ddl["document_grants"]
     # enums are VARCHAR + CHECK
     assert "CHECK (role IN ('owner', 'admin', 'member', 'guest'))" in ddl["workspace_members"]
     assert "CHECK (upload_status IN ('pending', 'ready', 'rejected'))" in ddl["document_versions"]

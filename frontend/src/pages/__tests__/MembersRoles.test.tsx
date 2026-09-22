@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,12 @@ const MEMBERS: WorkspaceMember[] = [
 const workspace = vi.hoisted(() => ({
   value: {} as Record<string, unknown>,
 }));
-const membersApi = vi.hoisted(() => ({ remove: vi.fn(), changeRole: vi.fn() }));
+const membersApi = vi.hoisted(() => ({
+  remove: vi.fn(),
+  changeRole: vi.fn(),
+  listInvites: vi.fn(),
+  revokeInvite: vi.fn(),
+}));
 const refreshMembers = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => vi.fn());
 
@@ -26,7 +31,9 @@ vi.mock("@/auth/AuthContext", () => ({ useAuth: () => ({ user: { id: "u-me" } })
 vi.mock("@/workspace/WorkspaceContext", () => ({ useWorkspace: () => workspace.value }));
 vi.mock("@/components/Sidebar", () => ({ Sidebar: () => null }));
 vi.mock("@/components/InviteModal", () => ({ InviteModal: () => null }));
-vi.mock("@/api/folders", () => ({ foldersApi: { list: vi.fn().mockResolvedValue([]) } }));
+vi.mock("@/api/documents", () => ({
+  documentsApi: { list: vi.fn().mockResolvedValue({ items: [], page: 1, total: 0 }) },
+}));
 vi.mock("@/api/workspaces", () => ({ workspacesApi: { transferOwnership: vi.fn() } }));
 vi.mock("@/api/members", () => ({ membersApi }));
 
@@ -51,6 +58,7 @@ describe("MembersRolesPage permissions (PRD 06)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     refreshMembers.mockResolvedValue(undefined);
+    membersApi.listInvites.mockResolvedValue([]);
   });
 
   it("does not show the member list to a Guest", () => {
@@ -105,5 +113,40 @@ describe("MembersRolesPage failures", () => {
     await userEvent.setup().click(within(row).getByRole("button", { name: "Remove" }));
     expect(toast).toHaveBeenCalledWith("Gus Guest removed — access revoked");
     expect(refreshMembers).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Pending invitations", () => {
+  const PENDING = {
+    id: "i1",
+    email: "waiting@x.com",
+    role: "member",
+    expires_at: "2026-10-01T00:00:00Z",
+    created_at: "2026-09-21T00:00:00Z",
+    expired: false,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    refreshMembers.mockResolvedValue(undefined);
+  });
+
+  it("lets an Admin see and revoke them", async () => {
+    membersApi.listInvites.mockResolvedValueOnce([PENDING]).mockResolvedValueOnce([]);
+    membersApi.revokeInvite.mockResolvedValue(undefined);
+    renderAs("admin");
+    const section = await screen.findByRole("region", { name: "Pending invitations" });
+    expect(within(section).getByText(/waiting@x\.com/)).toBeInTheDocument();
+    await userEvent.click(within(section).getByRole("button", { name: "Revoke" }));
+    expect(membersApi.revokeInvite).toHaveBeenCalledWith("", "i1");
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Pending invitations" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("never asks for them, or shows them, to a Member", () => {
+    renderAs("member");
+    expect(membersApi.listInvites).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Pending invitations" })).not.toBeInTheDocument();
   });
 });

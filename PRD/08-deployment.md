@@ -21,12 +21,13 @@ flowchart LR
 - **`db`** — PostgreSQL 18, named volume for data persistence, healthcheck gating dependent services.
 - **`storage`** — MinIO, named volume for object data, the S3 API port 9000 is published so the browser can use pre-signed URLs (`http://localhost:9000` in dev; put it behind TLS in production); the console port is exposed only in local/dev compose overrides (never in a production-facing compose file); bucket auto-created on first boot via an init step.
 - **`migrate`** — one-shot container running `alembic upgrade head`; `api` has `depends_on: migrate: { condition: service_completed_successfully }`.
+- **`purge`** — housekeeping loop (`python -m app.jobs.purge --every 3600`): removes documents past the trash grace period, abandons unconfirmed uploads, deletes expired revoked tokens. Uses the same image, database and storage as `api`.
 - **`api`** — FastAPI/Uvicorn; environment-configured DB DSN, MinIO/S3 credentials and endpoint, JWT secret, upload size limit; never bakes secrets into the image.
 - **`frontend`** — built React app served by a lightweight static server (or Nginx), proxying `/api/*` to the `api` service in dev; in production this tier can instead be a CDN/static host pointing at the same API.
 
 ## Configuration
 
-- A single `.env.example` at the repo root documents every required variable (`DATABASE_URL`, `S3_ENDPOINT_URL`, `S3_PUBLIC_ENDPOINT_URL` (optional; the address the browser can reach, defaults to `S3_ENDPOINT_URL`), `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `JWT_SECRET`, `MAX_UPLOAD_MB`, `FRONTEND_URL`) — `docker-compose up` should work from a copy of this file with no manual edits for local dev.
+- A single `.env.example` at the repo root documents every required variable (`DATABASE_URL`, `S3_ENDPOINT_URL`, `S3_PUBLIC_ENDPOINT_URL` (optional; the address the browser can reach, defaults to `S3_ENDPOINT_URL`), `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_STARTTLS` / `SMTP_SSL` (optional; **without `SMTP_HOST` emails are written to the API log instead of sent**, which is how a developer reads invitation, verification and reset links), `REQUIRE_EMAIL_VERIFICATION` (default true), `INVITE_EXPIRE_DAYS`, `TRASH_GRACE_DAYS`, `PENDING_UPLOAD_TTL_HOURS`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `JWT_SECRET`, `MAX_UPLOAD_MB`, `FRONTEND_URL`) — `docker-compose up` should work from a copy of this file with no manual edits for local dev.
 - The `StorageBackend` abstraction (see [03-architecture.md](./03-architecture.md)) is selected by a single env var (`STORAGE_BACKEND=s3|local`), so swapping MinIO for local disk (or real S3) in another environment is a config change, not a code change.
 
 ## Environments

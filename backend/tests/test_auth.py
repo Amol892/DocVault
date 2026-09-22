@@ -24,7 +24,7 @@ class TestRegister:
         response = await register(client)
         assert response.status_code == 201
         body = response.json()
-        assert set(body) == {"id", "email", "name"}
+        assert set(body) == {"id", "email", "name", "email_verified"}
         assert body["email"] == "ana@example.com"
         assert len(body["id"]) == 12
         assert PASSWORD not in response.text
@@ -122,7 +122,12 @@ class TestMe:
         user = await make_user(client, "ana@example.com", "Ana Lee")
         response = await client.get(f"{API}/auth/me", headers=user.headers)
         assert response.status_code == 200
-        assert response.json() == {"id": user.id, "email": "ana@example.com", "name": "Ana Lee"}
+        assert response.json() == {
+            "id": user.id,
+            "email": "ana@example.com",
+            "name": "Ana Lee",
+            "email_verified": True,
+        }
 
     async def test_missing_token_is_401_with_a_bearer_challenge(self, client: AsyncClient) -> None:
         response = await client.get(f"{API}/auth/me")

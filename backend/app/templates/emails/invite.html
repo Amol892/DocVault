@@ -1,0 +1,14 @@
+{% extends "_layout.html" %}
+{% from "_button.html" import button %}
+{% block body %}
+<p>Hi,</p>
+<p>
+  <strong>{{ inviter_name }}</strong> invited you to join the workspace
+  <strong>{{ workspace_name }}</strong> on DocVault, as <strong>{{ role }}</strong>.
+</p>
+{{ button(url, "Accept invitation") }}
+<p style="color:#6b7280;font-size:12px;">
+  Sign in or create an account with this email address first, then open the link above to accept.
+  The invitation expires in {{ expire_days }} days.
+</p>
+{% endblock %}
