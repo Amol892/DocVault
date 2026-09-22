@@ -14,7 +14,7 @@ flowchart TB
 
     subgraph App["Application Layer — FastAPI"]
         AuthMW["Auth dependency<br/>(JWT validation, current_user)"]
-        AuthZ["Authorization layer<br/>(workspace membership + role + folder_grants checks)"]
+        AuthZ["Authorization layer<br/>(workspace membership + role + document_grants checks)"]
         Routes["Route handlers<br/>(auth, workspaces, members, folders, documents, share-links)"]
         Storage["StorageBackend interface<br/>(pre-signed URL issuance)"]
     end
@@ -39,7 +39,7 @@ flowchart TB
 
 **Application layer (FastAPI).** Split into three concerns that stay decoupled on purpose:
 - *Auth dependency* — validates the JWT on every protected request and resolves `current_user`. This is the only place a request's identity is established.
-- *Authorization layer* — a shared dependency, not duplicated per-route, that answers "does `current_user` have the right relationship to this `workspace_id`/`document_id`/`folder_id`?" by checking `workspace_members` (role) and, for Guests, `folder_grants`. Every document/folder/workspace route goes through this before touching data. See [06-permission-matrix.md](./06-permission-matrix.md) for why this single-path design matters for security review.
+- *Authorization layer* — a shared dependency, not duplicated per-route, that answers "does `current_user` have the right relationship to this `workspace_id`/`document_id`/`folder_id`?" by checking `workspace_members` (role) and, for Guests, `document_grants` (a Guest has no standing on any folder at all). Every document/folder/workspace route goes through this before touching data. See [06-permission-matrix.md](./06-permission-matrix.md) for why this single-path design matters for security review.
 - *Route handlers* — thin; they call the authorization layer, then read/write through SQLAlchemy, and for file operations ask the `StorageBackend` interface for a pre-signed URL rather than touching bytes themselves.
 
 **Data layer.**

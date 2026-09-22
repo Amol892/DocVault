@@ -15,6 +15,20 @@ export const authApi = {
   async register(email: string, password: string, name: string): Promise<User> {
     return apiClient.post<User>("/auth/register", { email, password, name });
   },
+  // FR-1: open the link from the verification email (works once, no session needed)
+  verifyEmail(token: string): Promise<void> {
+    return apiClient.post("/auth/verify-email", { token });
+  },
+  resendVerification(): Promise<void> {
+    return apiClient.post("/auth/resend-verification");
+  },
+  // FR-4: always succeeds, whether or not the address has an account
+  forgotPassword(email: string): Promise<void> {
+    return apiClient.post("/auth/forgot-password", { email });
+  },
+  resetPassword(token: string, password: string): Promise<void> {
+    return apiClient.post("/auth/reset-password", { token, password });
+  },
   async me(): Promise<User> {
     return apiClient.get<User>("/auth/me");
   },

@@ -1,17 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import type { Document } from "@/types";
+import type { Document, Folder } from "@/types";
 import { documentsApi } from "@/api/documents";
+import { foldersApi } from "@/api/folders";
 import { errorMessage } from "@/api/client";
 import { Sidebar } from "@/components/Sidebar";
 import { VisibilityBadge } from "@/components/VisibilityBadge";
 import { UploadModal } from "@/components/UploadModal";
 import { ShareLinkModal } from "@/components/ShareLinkModal";
+import { FolderPickerModal } from "@/components/FolderPickerModal";
+import { VersionsModal } from "@/components/VersionsModal";
+import { PreviewModal } from "@/components/PreviewModal";
+import { isPreviewable } from "@/components/previewable";
 import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { can } from "@/permissions/roleHierarchy";
 import { useToast } from "@/hooks/useToast";
 import { useSafeAction } from "@/hooks/useSafeAction";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { MAX_UPLOAD_MB } from "@/config";
 
 export function DashboardPage() {
   const { workspaceId = "", folderId } = useParams();
@@ -22,6 +28,14 @@ export function DashboardPage() {
   const [search, setSearch] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [shareDoc, setShareDoc] = useState<Document | null>(null);
+  const [versionsDoc, setVersionsDoc] = useState<Document | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
+  const [moveDoc, setMoveDoc] = useState<Document | null>(null);
+  const [allFolders, setAllFolders] = useState<Folder[]>([]);
+  // bump to load the list again after a change made here
+  const [reloadKey, setReloadKey] = useState(0);
+  const versionInput = useRef<HTMLInputElement>(null);
+  const versionTarget = useRef<Document | null>(null);
   const toast = useToast();
   const safe = useSafeAction();
   // one request when typing pauses, not one per keystroke
@@ -46,7 +60,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, folderId, query]);
+  }, [workspaceId, folderId, query, reloadKey]);
 
   function applyVisibilityChange(docId: string, visibility: "workspace" | "public") {
     setDocuments((docs) => docs.map((d) => (d.id === docId ? { ...d, visibility } : d)));
@@ -55,6 +69,59 @@ export function DashboardPage() {
   async function download(doc: Document) {
     const res = await safe(() => documentsApi.getDownloadUrl(doc.id));
     if (res.ok) window.open(res.value, "_blank", "noopener");
+  }
+
+  async function renameDoc(doc: Document) {
+    const filename = window.prompt("Rename document", doc.filename)?.trim();
+    if (!filename || filename === doc.filename) return;
+    const res = await safe(() => documentsApi.rename(doc.id, filename));
+    if (res.ok) setReloadKey((k) => k + 1);
+  }
+
+  async function deleteDoc(doc: Document) {
+    if (!window.confirm(`Move "${doc.filename}" to the trash? You can restore it for 30 days.`)) {
+      return;
+    }
+    const res = await safe(() => documentsApi.softDelete(doc.id));
+    if (res.ok) {
+      toast(`"${doc.filename}" moved to the trash`);
+      setReloadKey((k) => k + 1);
+    }
+  }
+
+  async function openMove(doc: Document) {
+    const res = await safe(() => foldersApi.list(workspaceId));
+    if (!res.ok) return;
+    setAllFolders(res.value);
+    setMoveDoc(doc);
+  }
+
+  async function moveTo(target: string | null) {
+    if (!moveDoc) return;
+    const res = await safe(() => documentsApi.move(moveDoc.id, target));
+    if (!res.ok) return;
+    setMoveDoc(null);
+    setReloadKey((k) => k + 1);
+  }
+
+  function chooseNewVersion(doc: Document) {
+    versionTarget.current = doc;
+    versionInput.current?.click();
+  }
+
+  async function uploadNewVersion(file: File | null) {
+    const doc = versionTarget.current;
+    if (versionInput.current) versionInput.current.value = "";
+    if (!file || !doc) return;
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      toast(`"${file.name}" is over the ${MAX_UPLOAD_MB} MB limit.`);
+      return;
+    }
+    const res = await safe(() => documentsApi.upload(file, { documentId: doc.id }));
+    if (res.ok) {
+      toast(`New version of "${doc.filename}" uploaded`);
+      setReloadKey((k) => k + 1);
+    }
   }
 
   const canUpload = !!myRole && can(myRole, "UPLOAD_DOCUMENT");
@@ -151,11 +218,41 @@ export function DashboardPage() {
               {documents.map((doc) => (
                 <tr key={doc.id} style={{ borderTop: "1px solid var(--color-border)" }}>
                   <td style={{ padding: "10px 8px", fontSize: 13 }}>
-                    <span
-                      style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 500 }}
-                    >
-                      📄 {doc.filename}
-                    </span>
+                    {isPreviewable(doc.mime_type) ? (
+                      <button
+                        onClick={() => setPreviewDoc(doc)}
+                        aria-label={`Preview ${doc.filename}`}
+                        title="Click to preview"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          fontWeight: 500,
+                          fontSize: 13,
+                          background: "transparent",
+                          border: "none",
+                          padding: 0,
+                          color: "var(--color-text-primary)",
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          textDecorationColor: "transparent",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.textDecorationColor = "currentcolor";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.textDecorationColor = "transparent";
+                        }}
+                      >
+                        📄 {doc.filename}
+                      </button>
+                    ) : (
+                      <span
+                        style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 500 }}
+                      >
+                        📄 {doc.filename}
+                      </span>
+                    )}
                   </td>
                   <td style={{ padding: "10px 8px" }}>
                     <VisibilityBadge visibility={doc.visibility} />
@@ -179,7 +276,28 @@ export function DashboardPage() {
                     {new Date(doc.updated_at).toLocaleDateString()}
                   </td>
                   <td style={{ padding: "10px 8px" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {canUpload && (
+                        <>
+                          <button className="btn btn-ghost" onClick={() => renameDoc(doc)}>
+                            Rename
+                          </button>
+                          <button className="btn btn-ghost" onClick={() => openMove(doc)}>
+                            Move
+                          </button>
+                          <button className="btn btn-ghost" onClick={() => chooseNewVersion(doc)}>
+                            New version
+                          </button>
+                        </>
+                      )}
+                      {isPreviewable(doc.mime_type) && (
+                        <button className="btn btn-ghost" onClick={() => setPreviewDoc(doc)}>
+                          View
+                        </button>
+                      )}
+                      <button className="btn btn-ghost" onClick={() => setVersionsDoc(doc)}>
+                        Versions
+                      </button>
                       {canShare && (
                         <button className="btn btn-ghost" onClick={() => setShareDoc(doc)}>
                           Share
@@ -188,6 +306,11 @@ export function DashboardPage() {
                       <button className="btn btn-ghost" onClick={() => download(doc)}>
                         Download
                       </button>
+                      {canUpload && (
+                        <button className="btn btn-ghost" onClick={() => deleteDoc(doc)}>
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -197,6 +320,24 @@ export function DashboardPage() {
         )}
       </div>
 
+      <input
+        ref={versionInput}
+        type="file"
+        hidden
+        aria-label="Choose the new version"
+        onChange={(e) => uploadNewVersion(e.target.files?.[0] ?? null)}
+      />
+      {versionsDoc && <VersionsModal document={versionsDoc} onClose={() => setVersionsDoc(null)} />}
+      {previewDoc && <PreviewModal document={previewDoc} onClose={() => setPreviewDoc(null)} />}
+      {moveDoc && (
+        <FolderPickerModal
+          title={`Move ${moveDoc.filename}`}
+          folders={allFolders}
+          currentId={moveDoc.folder_id}
+          onPick={moveTo}
+          onClose={() => setMoveDoc(null)}
+        />
+      )}
       {uploadOpen && (
         <UploadModal
           workspaceId={workspaceId}

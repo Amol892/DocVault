@@ -86,3 +86,32 @@ describe("documentsApi.upload", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("documentsApi trash, restore and versions", () => {
+  it("adds a version by sending the document id with the upload request", async () => {
+    mockUploadFlow();
+    await documentsApi.upload(new File(["x"], "a.txt", { type: "text/plain" }), {
+      documentId: "d1",
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ document_id: "d1" });
+  });
+
+  it("lists the trash and restores a document", async () => {
+    fetchMock.mockResolvedValueOnce(json({ items: [DOC], page: 1, total: 1 }));
+    await documentsApi.trash({ workspace_id: "w1" });
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/documents/trash?workspace_id=w1");
+
+    fetchMock.mockResolvedValueOnce(json(DOC));
+    await documentsApi.restore("d1");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/documents/d1/restore");
+    expect(fetchMock.mock.calls[1][1].method).toBe("POST");
+  });
+
+  it("reads the version list and an old version's download url", async () => {
+    fetchMock.mockResolvedValueOnce(json([{ version_number: 1 }]));
+    expect(await documentsApi.versions("d1")).toEqual([{ version_number: 1 }]);
+    fetchMock.mockResolvedValueOnce(json({ download_url: "https://s/x", expires_in: 300 }));
+    expect(await documentsApi.getVersionDownloadUrl("d1", 1)).toBe("https://s/x");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/documents/d1/versions/1/download-url");
+  });
+});

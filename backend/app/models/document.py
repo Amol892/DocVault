@@ -4,6 +4,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     DateTime,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -14,7 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, RandomIdMixin, TimestampMixin, fk_column
+from app.db.base import Base, RandomIdMixin, TimestampMixin, fk_column, id_column
 from app.models.enums import UploadStatus, db_enum
 
 
@@ -32,6 +33,8 @@ class Document(RandomIdMixin, TimestampMixin, Base):
         CheckConstraint(
             r"length(filename) BETWEEN 1 AND 255 AND filename !~ '[/\\]'", name="filename_valid"
         ),
+        # target of the composite foreign key from document_grants
+        UniqueConstraint("id", "workspace_id", name="uq_documents_id_workspace_id"),
         Index(
             "ix_documents_workspace_id_folder_id_live",
             "workspace_id",
@@ -82,3 +85,38 @@ class DocumentVersion(RandomIdMixin, TimestampMixin, Base):
         db_enum(UploadStatus, "upload_status"), server_default=UploadStatus.PENDING.value
     )
     created_by: Mapped[str] = fk_column("users.id")
+
+
+class DocumentGrant(RandomIdMixin, TimestampMixin, Base):
+    """Scopes a Guest to exactly one document (FR-21). Deleting the row revokes access.
+
+    Grants are folder-pinned: they apply to the document wherever it currently is, but moving the
+    document to a different folder (directly, or indirectly when the folder it was in gets deleted
+    and its contents re-parented, FR-23) revokes them — see services/documents.py and
+    services/folders.py, which delete the row whenever a granted document's folder_id changes.
+    """
+
+    __tablename__ = "document_grants"
+    __table_args__ = (
+        UniqueConstraint("document_id", "user_id", name="uq_document_grants_document_id_user_id"),
+        # the document must belong to the same workspace
+        ForeignKeyConstraint(
+            ["document_id", "workspace_id"],
+            ["documents.id", "documents.workspace_id"],
+            name="fk_document_grants_document_id_documents",
+            ondelete="CASCADE",
+        ),
+        # removing the membership removes the grants in the same statement (immediate revocation)
+        ForeignKeyConstraint(
+            ["workspace_id", "user_id"],
+            ["workspace_members.workspace_id", "workspace_members.user_id"],
+            name="fk_document_grants_workspace_id_workspace_members",
+            ondelete="CASCADE",
+        ),
+        Index("ix_document_grants_workspace_id_user_id", "workspace_id", "user_id"),
+    )
+
+    workspace_id: Mapped[str] = id_column()
+    document_id: Mapped[str] = id_column()
+    user_id: Mapped[str] = id_column()
+    granted_by: Mapped[str] = fk_column("users.id")

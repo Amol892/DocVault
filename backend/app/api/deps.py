@@ -17,10 +17,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import forbidden, not_found, unauthorized
+from app.core.errors import ApiError, forbidden, not_found, unauthorized
 from app.core.permissions import Action, can
 from app.core.security import InvalidTokenError, TokenClaims, decode_access_token
 from app.db.session import get_session
+from app.models.enums import WorkspaceRole
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.schemas.document import UploadUrlRequest
@@ -28,12 +29,14 @@ from app.services.access import (
     DocumentAccess,
     FolderAccess,
     ListScope,
+    ShareLinkAccess,
     UploadTarget,
     WorkspaceAccess,
-    can_see_folder,
     get_live_folder,
     load_document_access,
     load_folder_access,
+    load_share_link_access,
+    load_trashed_document_access,
     load_workspace_access,
 )
 from app.services.accounts import is_token_revoked
@@ -60,18 +63,30 @@ async def get_current_claims(
     return claims
 
 
-async def get_current_user(
+async def get_current_user_unverified(
     claims: Annotated[TokenClaims, Depends(get_current_claims)],
     session: SessionDep,
 ) -> User:
+    """The signed-in user, even if they have not confirmed their email yet. Only the account
+    endpoints (/auth/me, resend-verification) use this; everything else needs a verified user."""
     user = await session.get(User, claims.user_id)
     if user is None or not user.is_active:
         raise unauthorized()
     return user
 
 
+async def get_current_user(
+    user: Annotated[User, Depends(get_current_user_unverified)],
+) -> User:
+    """FR-1: a signed-in user with a confirmed email address."""
+    if not user.email_verified:
+        raise ApiError(403, "EMAIL_NOT_VERIFIED", "Confirm your email address to continue.")
+    return user
+
+
 CurrentClaims = Annotated[TokenClaims, Depends(get_current_claims)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+AnyUser = Annotated[User, Depends(get_current_user_unverified)]
 
 
 async def get_workspace_access(
@@ -181,9 +196,9 @@ async def get_upload_target(
         raise not_found("Workspace not found.")
     if not can(workspace.role, Action.UPLOAD_DOCUMENT):
         raise forbidden()
-    if body.folder_id is not None and (
-        await get_live_folder(session, workspace.workspace.id, body.folder_id) is None
-        or not await can_see_folder(session, workspace, body.folder_id)
+    if (
+        body.folder_id is not None
+        and await get_live_folder(session, workspace.workspace.id, body.folder_id) is None
     ):
         raise not_found("Folder not found.")
     return UploadTarget(user=user, workspace=workspace, folder_id=body.folder_id, document=None)
@@ -195,8 +210,10 @@ async def get_list_scope(
     workspace_id: Annotated[str | None, Query()] = None,
     folder_id: Annotated[str | None, Query()] = None,
 ) -> ListScope:
-    """No workspace = the caller's own personal documents. Otherwise membership is required, and a
-    named folder must exist and be visible to the caller."""
+    """No workspace = the caller's own personal documents. Otherwise membership is required. A
+    Guest never browses folders (FR-21): any `folder_id` they send is ignored and they always get
+    their flat set of individually granted documents. For Members and above, a named folder must
+    exist."""
     if workspace_id is None:
         if folder_id is not None:
             raise not_found("Folder not found.")
@@ -204,9 +221,44 @@ async def get_list_scope(
     workspace = await load_workspace_access(session, user, workspace_id)
     if workspace is None:
         raise not_found("Workspace not found.")
-    if folder_id is not None and (
-        await get_live_folder(session, workspace.workspace.id, folder_id) is None
-        or not await can_see_folder(session, workspace, folder_id)
+    if workspace.role == WorkspaceRole.GUEST:
+        return ListScope(user=user, workspace=workspace, folder_id=None)
+    if (
+        folder_id is not None
+        and await get_live_folder(session, workspace.workspace.id, folder_id) is None
     ):
         raise not_found("Folder not found.")
     return ListScope(user=user, workspace=workspace, folder_id=folder_id)
+
+
+async def get_trashed_document_access(
+    document_id: str, user: CurrentUser, session: SessionDep
+) -> DocumentAccess:
+    """A soft-deleted document the caller could restore; 404 for anything else."""
+    access = await load_trashed_document_access(session, user, document_id)
+    if access is None:
+        raise not_found("Document not found.")
+    if not can(access.role, Action.UPLOAD_DOCUMENT):
+        raise forbidden()
+    return access
+
+
+async def get_trash_scope(scope: Annotated[ListScope, Depends(get_list_scope)]) -> ListScope:
+    """Who may look at the trash: the owner of personal documents, Members and above in a
+    workspace (never Guests)."""
+    if scope.workspace is not None and not can(scope.workspace.role, Action.UPLOAD_DOCUMENT):
+        raise forbidden()
+    return scope
+
+
+async def get_share_link_access(
+    link_id: str, user: CurrentUser, session: SessionDep
+) -> ShareLinkAccess:
+    """A share link the caller may manage: 404 unless they can see its document, 403 unless their
+    role may share (Members and above; never Guests)."""
+    access = await load_share_link_access(session, user, link_id)
+    if access is None:
+        raise not_found("Share link not found.")
+    if not can(access.document.role, Action.CREATE_SHARE_LINK):
+        raise forbidden()
+    return access

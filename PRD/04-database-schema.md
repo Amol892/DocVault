@@ -8,7 +8,7 @@ The SQLAlchemy models (`backend/app/models/`) are what `alembic revision --autog
 
 | In the models / first migration | Designed here, planned as a follow-up hand-written revision |
 |---|---|
-| All 13 tables, both mixins, enums stored as VARCHAR + named CHECK constraints (`workspace_role`, `upload_status`, `share_access_outcome`) | Deferred exactly-one-owner trigger (the unique index allowing at most one owner **is** in the models) |
+| All 14 tables, both mixins, enums stored as VARCHAR + named CHECK constraints (`workspace_role`, `upload_status`, `share_access_outcome`, `auth_token_purpose`) | Deferred exactly-one-owner trigger (the unique index allowing at most one owner **is** in the models) |
 | Every foreign key, including the composite ones (the schema has no circular foreign keys) | Folder parent-scope / cycle trigger; document-folder scope trigger; folder-grant and invite-folder triggers |
 | Unique constraints, partial unique indexes (one owner per workspace, no duplicate pending invite, sibling folder names with `NULLS NOT DISTINCT`), CHECK constraints, plain indexes | Append-only triggers on `document_versions`, `share_link_access_logs`, `activity_logs` |
 | Case-insensitive unique email via an index on `lower(email)` | Row-Level Security policies, helper functions and the `docvault_app` role |
@@ -35,7 +35,7 @@ Every table gets both mixins. They are two SQLAlchemy mixins in `backend/app/db/
 - 12 characters, base62 (`0-9A-Za-z`), **first character always a letter** (52 × 62¹¹ ≈ 3 × 10²¹ keys). Examples: `Ada6zQ8mfUFL`, `zjvsx3fDXshK`.
 - Generated **in Python** by the mixin (`app.core.ids.generate_random_id`, `secrets` CSPRNG), like a Django random-id mixin. No database function or extension is involved, so plain `alembic revision --autogenerate` produces a complete migration. There is no collision-retry loop: a collision would surface as a primary-key violation, which at this key size is a practical impossibility. Inserts made outside the app must supply an `id`.
 - All foreign-key columns are therefore `varchar(12)`.
-- Composite-key tables from the original PRD (`workspace_members`, `workspace_invite_folders`) also get the random `id`; their former composite key is now a `UNIQUE` constraint.
+- Composite-key tables from the original PRD (`workspace_members`, `workspace_invite_documents`) also get the random `id`; their former composite key is now a `UNIQUE` constraint.
 - Random IDs stop enumeration and information leakage. They are **not** an access control: authorization stays in `api/deps.py` plus RLS, and share/invite tokens remain separate ≥128-bit secrets.
 
 **TimestampMixin.** `created_at` and `updated_at` (`timestamptz NOT NULL`, server default `now()`; `updated_at` also has an ORM `onupdate=now()`). The two append-only log tables keep the columns for uniformity, but `updated_at` never changes.
@@ -57,20 +57,21 @@ Every table below also has `id` (PK), `created_at`, `updated_at` from the mixins
 ```mermaid
 erDiagram
     users ||--o{ revoked_tokens : "logs out via"
+    users ||--o{ auth_tokens : "confirms / resets via"
     users ||--o{ workspaces : "owns"
     workspaces ||--o{ workspace_members : "has"
     users ||--o{ workspace_members : "member via"
     workspaces ||--o{ workspace_invites : "has"
-    workspace_invites ||--o{ workspace_invite_folders : "scopes guest to"
-    folders ||--o{ workspace_invite_folders : "listed in"
+    workspace_invites ||--o{ workspace_invite_documents : "scopes guest to"
+    documents ||--o{ workspace_invite_documents : "listed in"
     workspaces |o--o{ folders : "contains (NULL = personal)"
     users ||--o{ folders : "creates"
     folders |o--o{ folders : "parent of"
-    folders ||--o{ folder_grants : "granted via"
-    workspace_members ||--o{ folder_grants : "guest scope"
     workspaces |o--o{ documents : "contains (NULL = personal)"
     users ||--o{ documents : "uploads"
     folders |o--o{ documents : "holds"
+    documents ||--o{ document_grants : "granted via"
+    workspace_members ||--o{ document_grants : "guest scope"
     documents ||--o{ document_versions : "has versions"
     documents ||--o{ share_links : "shared via"
     share_links ||--o{ share_link_access_logs : "accessed via"
@@ -91,6 +92,16 @@ erDiagram
         text jti UK
         text user_id FK
         timestamptz expires_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    auth_tokens {
+        text id PK
+        text user_id FK
+        text purpose
+        text token_hash UK
+        timestamptz expires_at
+        timestamptz used_at
         timestamptz created_at
         timestamptz updated_at
     }
@@ -124,10 +135,10 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
-    workspace_invite_folders {
+    workspace_invite_documents {
         text id PK
         text invite_id FK
-        text folder_id FK
+        text document_id FK
         timestamptz created_at
         timestamptz updated_at
     }
@@ -141,10 +152,10 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
-    folder_grants {
+    document_grants {
         text id PK
         text workspace_id FK
-        text folder_id FK
+        text document_id FK
         text user_id FK
         text granted_by FK
         timestamptz created_at
@@ -215,13 +226,14 @@ erDiagram
 |---|---|---|
 | Identity | `users` | Account identity and credentials |
 | Identity | `revoked_tokens` ➕ | Blacklist of JWTs revoked by logout |
+| Identity | `auth_tokens` ➕ | Single-use emailed tokens: verify an email (FR-1), reset a password (FR-4) |
 | Tenancy | `workspaces` | A tenant / team |
 | Tenancy | `workspace_members` | Who belongs to a workspace and at what role |
 | Tenancy | `workspace_invites` | Pending invitations by email (FR-18) |
-| Tenancy | `workspace_invite_folders` ➕ | Folders a Guest invite will be granted on acceptance (FR-21) |
+| Tenancy | `workspace_invite_documents` ➕ | Documents a Guest invite will be granted on acceptance (FR-21) |
 | Content | `folders` | Folder hierarchy, personal or workspace-scoped (FR-22) |
-| Content | `folder_grants` | Scopes a Guest to specific folders (FR-21) |
 | Content | `documents` | One row per logical document (metadata only) |
+| Content | `document_grants` | Scopes a Guest to specific documents (FR-21) |
 | Content | `document_versions` | Append-only version history (FR-8) |
 | Sharing | `share_links` | External, token-based access to exactly one document (FR-10…15) |
 | Sharing | `share_link_access_logs` | Append-only audit trail of link usage (FR-14) |
@@ -248,6 +260,22 @@ Account identity and credentials. Never hard-deleted (deactivate instead) so own
 | `updated_at` | timestamptz | no | — | TimestampMixin — server default now(); ORM onupdate now() |
 
 - **Planned follow-up:** RLS: a user sees themself and people who share a workspace with them; anyone may register (pre-auth insert).
+
+#### `auth_tokens` ➕
+
+Single-use, expiring tokens sent by email: confirming an address (FR-1) and resetting a password (FR-4). Only the SHA-256 hash of the token is stored; the raw value exists only in the email. A token is consumed by one conditional `UPDATE ... WHERE used_at IS NULL AND expires_at > now() RETURNING user_id`, so two requests can never both use it.
+
+| Column | Type | Nullable | Keys | Notes |
+|---|---|:---:|---|---|
+| `id` | text | no | PK | RandomIdMixin |
+| `user_id` | text | no | FK, IX | → users.id (ON DELETE CASCADE) |
+| `purpose` | varchar + CHECK | no | — | `verify_email` or `reset_password` |
+| `token_hash` | varchar(64) | no | UK | lower-case hex SHA-256 of a 256-bit token (CHECK `^[0-9a-f]{64}$`) |
+| `expires_at` | timestamptz | no | — | 24 h for verification, 60 min for reset |
+| `used_at` | timestamptz | yes | — | set when consumed, or when a newer token for the same purpose replaces it |
+| `created_at`, `updated_at` | timestamptz | no | — | mixins |
+
+`users.email_verified` (boolean, not null, **server default true**) records FR-1. The default keeps accounts that existed before verification was added usable; registration sets it explicitly (false until the emailed link is opened, unless `REQUIRE_EMAIL_VERIFICATION=false`).
 
 #### `revoked_tokens` ➕
 
@@ -319,19 +347,19 @@ Pending invitations by email (FR-18). Only the token hash is stored.
 
 - Partial unique (workspace_id, email) WHERE accepted_at IS NULL AND revoked_at IS NULL → no duplicate pending invite.
 
-#### `workspace_invite_folders` ➕
+#### `workspace_invite_documents` ➕
 
-Folders a Guest invite will be granted on acceptance (FR-21). Without it a guest invite cannot carry its scope.
+Documents a Guest invite will be granted on acceptance (FR-21). Without it a guest invite cannot carry its scope.
 
 | Column | Type | Nullable | Keys | Notes |
 |---|---|:---:|---|---|
 | `id` | text | no | PK | RandomIdMixin — generated in Python (app.core.ids): 12-char base62, letter first |
 | `invite_id` | text | no | FK | → workspace_invites.id, ON DELETE CASCADE |
-| `folder_id` | text | no | FK | → folders.id, ON DELETE CASCADE; UNIQUE (invite_id, folder_id) |
+| `document_id` | text | no | FK | → documents.id, ON DELETE CASCADE; UNIQUE (invite_id, document_id) |
 | `created_at` | timestamptz | no | — | TimestampMixin — server default now() |
 | `updated_at` | timestamptz | no | — | TimestampMixin — server default now(); ORM onupdate now() |
 
-- **Planned follow-up:** Trigger: invite role must be guest and the folder must belong to the invite's workspace.
+- **Planned follow-up:** Trigger: invite role must be guest and the document must belong to the invite's workspace.
 
 ### Content
 
@@ -350,28 +378,9 @@ Folder hierarchy, personal or workspace-scoped (FR-22). Deleting a folder reloca
 | `created_at` | timestamptz | no | — | TimestampMixin — server default now() |
 | `updated_at` | timestamptz | no | — | TimestampMixin — server default now(); ORM onupdate now() |
 
-- UNIQUE (id, workspace_id) — target for the composite FK from folder_grants.
 - Unique sibling name, case-insensitive, live rows only (NULLS NOT DISTINCT), separately for workspace and personal scope.
 - **Planned follow-up:** Trigger: parent must be in the same scope (same workspace, or same owner when personal); cycles rejected.
 - Indexes: (workspace_id, parent_folder_id), parent_folder_id, owner_id WHERE personal.
-
-#### `folder_grants`
-
-Scopes a Guest to specific folders (FR-21). A grant covers the folder and all descendants. Deleting the row revokes access.
-
-| Column | Type | Nullable | Keys | Notes |
-|---|---|:---:|---|---|
-| `id` | text | no | PK | RandomIdMixin — generated in Python (app.core.ids): 12-char base62, letter first |
-| `workspace_id` | text | no | FK | added; part of both composite FKs below |
-| `folder_id` | text | no | FK | → folders (id, workspace_id), ON DELETE CASCADE |
-| `user_id` | text | no | FK | → workspace_members (workspace_id, user_id), ON DELETE CASCADE |
-| `granted_by` | text | no | FK | → users.id |
-| `created_at` | timestamptz | no | — | TimestampMixin — server default now() |
-| `updated_at` | timestamptz | no | — | TimestampMixin — server default now(); ORM onupdate now() |
-
-- UNIQUE (folder_id, user_id).
-- Removing a membership cascades to its grants in the same statement → immediate revocation (FR-19).
-- **Planned follow-up:** Trigger: grantee must be a guest; grantor must be owner/admin of that workspace.
 
 #### `documents`
 
@@ -389,8 +398,27 @@ One row per logical document (metadata only). The file bytes live in object stor
 | `updated_at` | timestamptz | no | — | TimestampMixin — server default now(); ORM onupdate now() |
 
 - storage_key is NOT on this table (PRD duplicated it): the active file is the latest version's (highest version_number). There is no current_version_id: it would make documents <-> document_versions circular, which Alembic autogenerate cannot create.
+- UNIQUE (id, workspace_id) — target for the composite FK from document_grants.
 - **Planned follow-up:** Trigger: folder must be in the same scope; personal document ⇒ personal folder of the same owner.
 - Indexes: (workspace_id, folder_id) WHERE deleted_at IS NULL; owner_id WHERE personal; folder_id; btree on lower(filename) (trigram index planned with FR-24).
+
+#### `document_grants`
+
+Scopes a Guest to one specific document (FR-21). Deleting the row revokes access. Grants are **folder-pinned**: the app deletes the row whenever the document's `folder_id` changes — directly (moved), or indirectly when the folder it was in is deleted and its contents re-parented (FR-23) — so a grant never silently widens as things get reorganized; re-granting after a move is explicit.
+
+| Column | Type | Nullable | Keys | Notes |
+|---|---|:---:|---|---|
+| `id` | text | no | PK | RandomIdMixin — generated in Python (app.core.ids): 12-char base62, letter first |
+| `workspace_id` | text | no | FK | part of both composite FKs below |
+| `document_id` | text | no | FK | → documents (id, workspace_id), ON DELETE CASCADE |
+| `user_id` | text | no | FK | → workspace_members (workspace_id, user_id), ON DELETE CASCADE |
+| `granted_by` | text | no | FK | → users.id |
+| `created_at` | timestamptz | no | — | TimestampMixin — server default now() |
+| `updated_at` | timestamptz | no | — | TimestampMixin — server default now(); ORM onupdate now() |
+
+- UNIQUE (document_id, user_id).
+- Removing a membership cascades to its grants in the same statement → immediate revocation (FR-19).
+- **Planned follow-up:** Trigger: grantee must be a guest; grantor must be owner/admin of that workspace.
 
 #### `document_versions`
 
@@ -477,7 +505,7 @@ Workspace audit trail (FR-29, FR-30). Append-only.
 - A document's access path is exactly one of: **owned personally** (`workspace_id NULL`, `owner_id` = you) or **workspace-scoped** (`workspace_id` set, checked against `workspace_members`) — never both, never neither. A trigger also forces a document's folder into the same scope.
 - The current version of a document is its `document_versions` row with the highest `version_number` (versions are append-only, and `UNIQUE (document_id, version_number)` makes the lookup an index scan). There is deliberately no back-reference column on `documents`: it would make `documents` and `document_versions` circular, and Alembic autogenerate cannot create a circular foreign key. Restoring an old version means copying it as a new version.
 - A workspace must have exactly one `owner`-role row in `workspace_members` at all times, and it must equal `workspaces.owner_id` — a partial unique index (at most one) plus a deferred constraint trigger (never zero, checked at commit), not just convention. Ownership transfer is demote + promote in one transaction.
-- A folder grant can only be given to a **guest**, by an **owner/admin**, on a folder of the **same workspace**. Removing the membership removes its grants in the same statement (`ON DELETE CASCADE`).
+- A document grant can only be given to a **guest**, by an **owner/admin**, on a document of the **same workspace**. Removing the membership removes its grants in the same statement (`ON DELETE CASCADE`); moving the document to a different folder removes it too (application-enforced — see `document_grants` above).
 - Folders cannot form cycles, and a folder's parent must be in the same scope.
 - `document_versions`, `share_link_access_logs` and `activity_logs` are append-only (triggers, plus least-privilege grants for the application role).
 
@@ -486,13 +514,13 @@ Workspace audit trail (FR-29, FR-30). Append-only.
 | Rule | Where |
 |---|---|
 | `RESTRICT` (default) | Everything not listed below. Users are never deleted; workspaces are soft-deleted first, and hard deletion is a later purge job, not an FK cascade. |
-| `CASCADE` | `workspace_members.workspace_id`; `workspace_invites.workspace_id`; `workspace_invite_folders.invite_id / folder_id`; `folder_grants.folder_id` and `(workspace_id, user_id)` (revocation on member removal). |
+| `CASCADE` | `workspace_members.workspace_id`; `workspace_invites.workspace_id`; `workspace_invite_documents.invite_id / document_id`; `document_grants.document_id` and `(workspace_id, user_id)` (revocation on member removal). |
 
 ## Row-Level Security (planned follow-up, not in the first migration)
 
 - The API connects as the non-owner role `docvault_app`. RLS is **enabled** on every table below but not `FORCE`d: the `SECURITY DEFINER` helper functions are owned by the table owner and must bypass RLS to avoid infinite policy recursion (e.g. `workspace_members`' own policy needs `workspace_members`). Consequence: **never run the API as the table owner.**
 - Every request runs `SET LOCAL app.current_user_id = '<user id>'`; policies compare against `app.current_user_id()`. With it unset, nothing matches.
-- Helpers: `app.workspace_role(ws)`, `app.is_workspace_admin(ws)`, `app.can_read_workspace_item(ws, folder)` (guests only via a grant on the folder **or any ancestor**), `app.can_write_scope`, `app.can_read_document / can_write_document`, `app.shares_workspace_with`.
+- Helpers: `app.workspace_role(ws)`, `app.is_workspace_admin(ws)`, `app.can_read_workspace_item(ws, folder)` (Member and above only — a Guest never has folder standing), `app.can_write_scope`, `app.can_read_document(doc)` (Member and above see the whole workspace; a Guest only via a `document_grants` row naming that exact document) `/ can_write_document`, `app.shares_workspace_with`.
 - Deliberate non-RLS paths (no current user exists yet), each a narrow `SECURITY DEFINER` function: `app.find_user_for_login(email)`, `app.resolve_share_link(token_hash)` (returns only that link's data — FR-15) and `app.log_share_access(...)`. Accepting an invite will be added the same way with the membership FRs.
 
 | Table | Read | Write |
@@ -500,9 +528,10 @@ Workspace audit trail (FR-29, FR-30). Append-only.
 | `users` | self, or shares a workspace | self update; open insert (registration) |
 | `workspaces` | creator or any member | insert as owner; update owner/admin; delete owner |
 | `workspace_members` | own row, or owner/admin/member of that workspace (guests cannot list members) | owner; admin (never touching the owner row); creator bootstrap of the first owner row; anyone may remove themself |
-| `workspace_invites`, `workspace_invite_folders` | owner/admin | owner/admin |
-| `folders`, `documents` | personal: owner; workspace: member or above, guests via granted folders | personal: owner; workspace: owner/admin/member |
-| `folder_grants` | the guest themself, or owner/admin | owner/admin |
+| `workspace_invites`, `workspace_invite_documents` | owner/admin | owner/admin |
+| `folders` | personal: owner; workspace: member or above (never guests — they have no folder standing) | personal: owner; workspace: owner/admin/member |
+| `documents` | personal: owner; workspace: member or above, guests via `document_grants` on that document | personal: owner; workspace: owner/admin/member |
+| `document_grants` | the guest themself, or owner/admin | owner/admin |
 | `document_versions` | as the parent document | as the parent document (update only the four finalise columns) |
 | `share_links` | anyone who can write the document | same (never guests) |
 | `share_link_access_logs` | whoever manages the link | via `app.log_share_access()` only |
@@ -516,10 +545,10 @@ Workspace audit trail (FR-29, FR-30). Append-only.
 
 | FR | Where it lives |
 |---|---|
-| FR-1 | `users` (email + password). **Email-verification state is not stored** — `email_verified_at` and `auth_tokens` were removed by decision; see "Open items" |
+| FR-1 | `users` (email + password, `email_verified`), `auth_tokens` (`verify_email`) |
 | FR-2 | `users.password_hash` |
 | FR-3 | Stateless JWT; `revoked_tokens` holds the tokens revoked by logout |
-| FR-4 | **Not stored in the schema** (`auth_tokens` removed by decision); see "Open items" |
+| FR-4 | `auth_tokens` (`reset_password`) |
 | FR-5, FR-6 | `documents` with `workspace_id NULL`; `document_versions.storage_key`, `size_bytes` |
 | FR-7 | `documents.deleted_at` (soft delete + grace clock) |
 | FR-8 | `document_versions` (append-only) |
@@ -530,11 +559,11 @@ Workspace audit trail (FR-29, FR-30). Append-only.
 | FR-13 | `share_links.revoked_at` |
 | FR-14 | `share_link_access_logs` |
 | FR-16 | `workspaces`, `workspace_members` (owner row) |
-| FR-17 | `workspace_members (user_id)` index, `folder_grants` |
+| FR-17 | `workspace_members (user_id)` index |
 | FR-18 | `workspace_invites` |
-| FR-19 | `workspace_members` delete + cascade to `folder_grants` |
+| FR-19 | `workspace_members` delete + cascade to `document_grants` |
 | FR-20 | one-owner unique index (in the models) + deferred constraint trigger (planned) |
-| FR-21 | `folder_grants`, `workspace_invite_folders` |
+| FR-21 | `document_grants`, `workspace_invite_documents` |
 | FR-22 | `folders.parent_folder_id` |
 | FR-23 | `folders.deleted_at`; `documents.folder_id` is `RESTRICT` |
 | FR-24 | `lower(filename)` btree index (trigram planned); `owner_id`, `folder_id` indexes |
@@ -557,10 +586,11 @@ Everything here is an addition or correction beyond the first version of this do
 9. **`workspace_members`**: added `invited_by`. **`folder_grants`**: added `workspace_id` (composite FKs), and a grant now covers descendants.
 10. **`share_links`**: added `allow_download` (FR-12). **`share_link_access_logs`**: added `user_agent`, `outcome`. **`activity_logs`**: added `target_type`, `target_id`.
 11. **Integrity beyond the PRD**: exactly-one-owner made concrete (unique index now, deferred trigger planned); folder scope/cycle triggers, append-only triggers and least-privilege grants for `docvault_app` are planned.
+12. **Guest scope moved from folders to documents** (*decided*, product change): `folder_grants` and `workspace_invite_folders` were replaced by `document_grants` and `workspace_invite_documents`. A Guest now has no standing on any folder at all — access is granted per document (FR-21) and is **folder-pinned**: the app revokes a document's grants whenever its `folder_id` changes, whether by an explicit move or because the folder it was in was deleted and its contents re-parented (FR-23).
 
 ## Open items (need a decision before the auth FRs)
 
-- **FR-1 (verify email) and FR-4 (password reset)** have no persistence now: the `auth_tokens` table and `users.email_verified_at` were removed by decision. Either implement them with **stateless signed, expiring tokens** (no table; but "single-use" cannot be enforced, and there is no record of who is verified), or amend FR-1/FR-4 in `07-functional-requirements.md` to drop them, or re-add the table later.
+- **FR-1 (verify email) and FR-4 (password reset)** — *decided*: implemented with the `auth_tokens` table and a `users.email_verified` flag (a boolean, not the earlier `email_verified_at` timestamp: who confirmed when is not recorded). Single-use is enforced by the database, which the stateless-token alternative could not do.
 - **`document_versions.storage_url`** is the object's address (`https://<endpoint>/<bucket>/<storage_key>`), not a download link: the bucket is private and clients only ever receive short-lived pre-signed URLs minted from `storage_key` after the authorization check. Never return `storage_url` to a client. It embeds the bucket endpoint, so changing endpoint/bucket means a data migration; `storage_key` stays the portable identifier.
 
 Related: [05-role-model.md](./05-role-model.md) for what `role` values mean, [06-permission-matrix.md](./06-permission-matrix.md) for how these tables get checked on every request, [docvault-erd.drawio](./docvault-erd.drawio) for the editable diagram.

@@ -16,6 +16,11 @@ class UploadStatus(enum.StrEnum):
     REJECTED = "rejected"
 
 
+class AuthTokenPurpose(enum.StrEnum):
+    VERIFY_EMAIL = "verify_email"
+    RESET_PASSWORD = "reset_password"  # noqa: S105  (a purpose label, not a credential)
+
+
 class ShareAccessOutcome(enum.StrEnum):
     OK = "ok"
     BAD_PASSWORD = "bad_password"  # noqa: S105  (an outcome label, not a credential)

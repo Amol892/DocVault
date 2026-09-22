@@ -67,6 +67,22 @@ services:
       storage-init:
         condition: service_completed_successfully
 
+  # housekeeping: removes documents past their trash grace period, abandoned uploads and expired
+  # revoked tokens (see backend/app/jobs/purge.py)
+  purge:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      S3_ENDPOINT_URL: http://storage:9000
+    command: ["python", "-m", "app.jobs.purge", "--every", "3600"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+
   frontend:
     build:
       context: ./frontend

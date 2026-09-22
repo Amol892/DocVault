@@ -38,8 +38,22 @@ class UserOut(BaseModel):
     id: str
     email: str
     name: str
+    email_verified: bool
 
 
 class LoginResponse(BaseModel):
     token: str
     user: UserOut
+
+
+class TokenRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: Email
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=8, max_length=128)

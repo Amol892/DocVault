@@ -6,8 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity import ActivityLog
+from app.models.document import Document, DocumentGrant
 from app.models.enums import WorkspaceRole
-from app.models.folder import Folder, FolderGrant
 from app.models.workspace import WorkspaceMember
 from tests.helpers import API, TestUser, workspace_with_roles
 
@@ -30,19 +30,22 @@ async def log_entries(db: AsyncSession, workspace_id: str, action: str) -> list[
     return list(result.scalars())
 
 
-async def grant_folder(
-    db: AsyncSession, workspace_id: str, owner: TestUser, guest: TestUser, name: str = "Contracts"
+async def grant_document(
+    db: AsyncSession, workspace_id: str, owner: TestUser, guest: TestUser, filename: str = "R.pdf"
 ) -> str:
-    folder = Folder(workspace_id=workspace_id, owner_id=owner.id, name=name)
-    db.add(folder)
+    document = Document(workspace_id=workspace_id, owner_id=owner.id, filename=filename)
+    db.add(document)
     await db.flush()
     db.add(
-        FolderGrant(
-            workspace_id=workspace_id, folder_id=folder.id, user_id=guest.id, granted_by=owner.id
+        DocumentGrant(
+            workspace_id=workspace_id,
+            document_id=document.id,
+            user_id=guest.id,
+            granted_by=owner.id,
         )
     )
     await db.commit()
-    return folder.id
+    return document.id
 
 
 def member_url(workspace_id: str, user: TestUser) -> str:
@@ -83,7 +86,7 @@ class TestListMembers:
             "email",
             "role",
             "joined_at",
-            "granted_folder_ids",
+            "granted_document_ids",
         }
         assert [m["role"] for m in body][0] == "owner"  # listed in the order they joined
 
@@ -95,19 +98,19 @@ class TestListMembers:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_guests_carry_their_granted_folders_and_others_do_not(
+    async def test_guests_carry_their_granted_documents_and_others_do_not(
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
         workspace, users = await workspace_with_roles(client, db)
-        folder_id = await grant_folder(db, workspace["id"], users["owner"], users["guest"])
+        document_id = await grant_document(db, workspace["id"], users["owner"], users["guest"])
 
         body = (
             await client.get(
                 f"{API}/workspaces/{workspace['id']}/members", headers=users["admin"].headers
             )
         ).json()
-        by_role = {m["role"]: m["granted_folder_ids"] for m in body}
-        assert by_role["guest"] == [folder_id]
+        by_role = {m["role"]: m["granted_document_ids"] for m in body}
+        assert by_role["guest"] == [document_id]
         assert by_role["owner"] is by_role["admin"] is by_role["member"] is None
 
 
@@ -142,18 +145,18 @@ class TestRemoval:
         assert entry.target_id == users["member"].id
         assert entry.metadata_ == {"role": "member"}
 
-    async def test_a_removed_guests_folder_grants_go_with_them(
+    async def test_a_removed_guests_document_grants_go_with_them(
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
         workspace, users = await workspace_with_roles(client, db)
-        await grant_folder(db, workspace["id"], users["owner"], users["guest"])
-        assert (await db.execute(select(func.count()).select_from(FolderGrant))).scalar_one() == 1
+        await grant_document(db, workspace["id"], users["owner"], users["guest"])
+        assert (await db.execute(select(func.count()).select_from(DocumentGrant))).scalar_one() == 1
 
         response = await client.delete(
             member_url(workspace["id"], users["guest"]), headers=users["owner"].headers
         )
         assert response.status_code == 204
-        assert (await db.execute(select(func.count()).select_from(FolderGrant))).scalar_one() == 0
+        assert (await db.execute(select(func.count()).select_from(DocumentGrant))).scalar_one() == 0
 
     async def test_the_owner_can_remove_an_admin(
         self, client: AsyncClient, db: AsyncSession
@@ -291,11 +294,11 @@ class TestRoleChange:
         assert response.status_code == 403
         assert await role_of(db, workspace["id"], users["member"].id) == WorkspaceRole.MEMBER
 
-    async def test_leaving_the_guest_role_clears_folder_grants(
+    async def test_leaving_the_guest_role_clears_document_grants(
         self, client: AsyncClient, db: AsyncSession
     ) -> None:
         workspace, users = await workspace_with_roles(client, db)
-        await grant_folder(db, workspace["id"], users["owner"], users["guest"])
+        await grant_document(db, workspace["id"], users["owner"], users["guest"])
 
         response = await client.patch(
             member_url(workspace["id"], users["guest"]),
@@ -303,7 +306,7 @@ class TestRoleChange:
             headers=users["admin"].headers,
         )
         assert response.status_code == 204
-        assert (await db.execute(select(func.count()).select_from(FolderGrant))).scalar_one() == 0
+        assert (await db.execute(select(func.count()).select_from(DocumentGrant))).scalar_one() == 0
 
     async def test_setting_the_same_role_is_a_quiet_no_op(
         self, client: AsyncClient, db: AsyncSession

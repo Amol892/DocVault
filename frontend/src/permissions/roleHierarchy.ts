@@ -16,7 +16,7 @@ export function hasLevel(role: Role, minLevel: number): boolean {
 
 // Action floors — keep these numbers in sync with the backend's ROLE_LEVEL table.
 export const ACTION_LEVEL = {
-  VIEW_GRANTED_DOCS: 1, // guest+ (still needs the folder-grant check separately)
+  VIEW_GRANTED_DOCS: 1, // guest+ (still needs the document-grant check separately)
   UPLOAD_DOCUMENT: 2, // member+
   CREATE_FOLDER: 2, // member+
   CREATE_SHARE_LINK: 2, // member+
@@ -24,7 +24,7 @@ export const ACTION_LEVEL = {
   INVITE_MEMBER: 3, // admin+
   CHANGE_MEMBER_ROLE: 3, // admin+ (plus owner-target guard below)
   REMOVE_MEMBER: 3, // admin+ (plus owner-target guard below)
-  GRANT_FOLDER_ACCESS: 3, // admin+
+  GRANT_DOCUMENT_ACCESS: 3, // admin+
   VIEW_ACTIVITY_LOG: 3, // admin+
   TRANSFER_OWNERSHIP: 4, // owner-only
   DELETE_WORKSPACE: 4, // owner-only

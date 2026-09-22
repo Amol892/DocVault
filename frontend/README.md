@@ -2,7 +2,7 @@
 
 React + TypeScript single-page app for DocVault: sign in, switch between workspaces, browse and upload documents, share them by link, and manage members and roles.
 
-It is written against the API described in [PRD/10-api-specification.md](../PRD/10-api-specification.md). The backend implements **auth, workspaces, members, folders and documents** so far (sign up, sign in and out, workspaces, roles, removing members, ownership transfer, folders with guest grants, document upload by pre-signed URL with versions, search, download, rename, move, delete); share links, invites and the activity log are still to come, so those screens cannot load real data yet. There is no mock mode.
+It is written against the API described in [PRD/10-api-specification.md](../PRD/10-api-specification.md). The backend implements every endpoint in that document, so every screen loads real data. There is no mock mode.
 
 ## Stack
 
@@ -59,7 +59,7 @@ src/
 - **Failures are shown, not swallowed.** UI actions run through `useSafeAction`, which turns any error into a toast; pages that load data show an error state instead of an empty one.
 - **Uploads use a pre-signed URL:** request the URL, `PUT` the bytes straight to storage with the same `Content-Type` that was declared, then confirm. File bytes never pass through the API.
 - **Share-link addresses appear once.** The server stores only a hash of the token, so a link's URL is shown right after it is created and can never be shown again. To get a new address, revoke the link and create another.
-- **Roles.** `permissions/roleHierarchy.ts` mirrors the permission matrix ([PRD/06](../PRD/06-permission-matrix.md)) to hide or disable actions a user cannot take. **It is not a security control.** The server checks every request; a Member sees the member list read-only, a Guest sees only the folders granted to them (the API returns just those; the UI does not filter).
+- **Roles.** `permissions/roleHierarchy.ts` mirrors the permission matrix ([PRD/06](../PRD/06-permission-matrix.md)) to hide or disable actions a user cannot take. **It is not a security control.** The server checks every request; a Member sees the member list read-only, a Guest sees only the documents individually granted to them, in a flat list — Guests have no standing on any folder at all (the API returns just what was granted; the UI does not filter).
 
 ## Security notes
 
@@ -68,12 +68,11 @@ src/
 
 ## Tests
 
-`pnpm test` runs 63 tests: the permission rules, the API client (headers, error mapping, session expiry), the upload content-type rule, route protection, login, the role-dependent members page, the sidebar's folder list and create / rename / delete actions, the share-link modal, the profile menu with sign out, and the workspace context (including a Guest opening a workspace without the member list). Vitest reads its settings from `vite.config.ts`; the jest-dom setup is `src/test/setup.ts`.
+`pnpm test` runs 141 tests: the permission rules, the API client (headers, error mapping, session expiry) and its document module, the upload content-type rule, route protection (including the unconfirmed-email gate), login (with the `next` redirect) and the profile menu, the role-dependent members page with pending invitations, the sidebar's folder list with create / rename / move / delete, the dashboard's document actions (rename, move, delete, new version, version history, inline preview), the trash, the activity log, the share-link modal (including the editable download toggle) and the public share viewer, the invite modal and accept page, email verification and password reset, sign-out, and the workspace context. Vitest reads its settings from `vite.config.ts`; the jest-dom setup is `src/test/setup.ts`.
 
 ## Not built yet
 
-- Moving or renaming documents from the UI (the API client has the calls), nested-folder creation, and moving folders.
-- The workspace activity log page (FR-30; `activityApi` exists).
-- Accepting an invite from an emailed link.
-- Public share-link viewer (opening a link without an account), document versions and restore.
-- Email verification and password reset: their storage was removed from the schema by decision.
+- Profile editing (name, email, password change while signed in): the profile menu is read-only and the API has no endpoint for it.
+- Personal documents (outside any workspace): the API supports them, the UI only shows workspaces.
+- Moving several documents at once, and a folder tree view (the sidebar lists folders flat, indented by nesting).
+- Restoring an old version as the current one (older versions can be downloaded).

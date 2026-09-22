@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Sidebar } from "@/components/Sidebar";
 import { RoleBadge } from "@/components/RoleBadge";
@@ -6,12 +6,12 @@ import { InviteModal } from "@/components/InviteModal";
 import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { membersApi } from "@/api/members";
 import { workspacesApi } from "@/api/workspaces";
-import { foldersApi } from "@/api/folders";
+import { documentsApi } from "@/api/documents";
 import { can, canActOnMember } from "@/permissions/roleHierarchy";
 import { useAuth } from "@/auth/AuthContext";
 import { useToast } from "@/hooks/useToast";
 import { useSafeAction } from "@/hooks/useSafeAction";
-import type { Folder, InvitableRole, Role, WorkspaceMember } from "@/types";
+import type { Document, InvitableRole, Role, WorkspaceInvite, WorkspaceMember } from "@/types";
 
 const ASSIGNABLE_ROLES: InvitableRole[] = ["admin", "member", "guest"];
 
@@ -20,7 +20,8 @@ export function MembersRolesPage() {
   const { user } = useAuth();
   const { workspace, members, myRole, refreshMembers } = useWorkspace();
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [folders, setFolders] = useState<Folder[]>([]);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
   const toast = useToast();
   const safe = useSafeAction();
 
@@ -31,15 +32,37 @@ export function MembersRolesPage() {
   useEffect(() => {
     if (!canManage) return;
     let cancelled = false;
-    safe(() => foldersApi.list(workspaceId)).then((res) => {
-      if (!cancelled && res.ok) setFolders(res.value);
+    safe(() => documentsApi.list({ workspace_id: workspaceId })).then((res) => {
+      if (!cancelled && res.ok) setDocuments(res.value.items);
     });
     return () => {
       cancelled = true;
     };
   }, [workspaceId, canManage, safe]);
 
-  const refresh = () => safe(refreshMembers);
+  // invitations still waiting to be accepted (Admin+)
+  const canInvite = !!myRole && can(myRole, "INVITE_MEMBER");
+  const loadInvites = useCallback(async () => {
+    if (!canInvite) return;
+    const res = await safe(() => membersApi.listInvites(workspaceId));
+    if (res.ok) setInvites(res.value);
+  }, [canInvite, workspaceId, safe]);
+
+  useEffect(() => {
+    void loadInvites();
+  }, [loadInvites]);
+
+  async function revokeInvite(invite: WorkspaceInvite) {
+    const res = await safe(() => membersApi.revokeInvite(workspaceId, invite.id));
+    if (!res.ok) return;
+    toast(`Invitation for ${invite.email} revoked`);
+    await loadInvites();
+  }
+
+  const refresh = async () => {
+    await safe(refreshMembers);
+    await loadInvites();
+  };
 
   async function changeRole(member: WorkspaceMember, role: Role) {
     if (!myRole || !canActOnMember(myRole, member.role, "CHANGE_MEMBER_ROLE")) {
@@ -82,12 +105,12 @@ export function MembersRolesPage() {
     await refresh();
   }
 
-  async function toggleFolderGrant(member: WorkspaceMember, folderId: string) {
-    const has = (member.granted_folder_ids ?? []).includes(folderId);
+  async function toggleDocumentGrant(member: WorkspaceMember, documentId: string) {
+    const has = (member.granted_document_ids ?? []).includes(documentId);
     const res = await safe(() =>
       has
-        ? foldersApi.revokeAccess(folderId, member.user_id)
-        : foldersApi.grantAccess(folderId, member.user_id),
+        ? documentsApi.revokeAccess(documentId, member.user_id)
+        : documentsApi.grantAccess(documentId, member.user_id),
     );
     if (res.ok) await refresh();
   }
@@ -161,12 +184,17 @@ export function MembersRolesPage() {
               <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{m.email}</div>
               {canManage && m.role === "guest" && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                  {folders.map((f) => {
-                    const on = (m.granted_folder_ids ?? []).includes(f.id);
+                  {documents.length === 0 && (
+                    <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
+                      No documents to grant yet
+                    </span>
+                  )}
+                  {documents.map((d) => {
+                    const on = (m.granted_document_ids ?? []).includes(d.id);
                     return (
                       <button
-                        key={f.id}
-                        onClick={() => toggleFolderGrant(m, f.id)}
+                        key={d.id}
+                        onClick={() => toggleDocumentGrant(m, d.id)}
                         style={{
                           fontSize: 11,
                           padding: "3px 8px",
@@ -177,7 +205,7 @@ export function MembersRolesPage() {
                           fontWeight: on ? 600 : 400,
                         }}
                       >
-                        {f.name}
+                        {d.filename}
                       </button>
                     );
                   })}
@@ -220,6 +248,37 @@ export function MembersRolesPage() {
             </div>
           </div>
         ))}
+        {canInvite && invites.length > 0 && (
+          <section aria-label="Pending invitations" style={{ marginTop: 24 }}>
+            <h2 style={{ fontSize: 14, margin: "0 0 8px" }}>Pending invitations</h2>
+            {invites.map((invite) => (
+              <div
+                key={invite.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "10px 8px",
+                  borderTop: "1px solid var(--color-border)",
+                  fontSize: 13,
+                }}
+              >
+                <span>
+                  {invite.email} · {invite.role}
+                  <span style={{ color: "var(--color-text-secondary)", marginLeft: 8 }}>
+                    {invite.expired
+                      ? "expired"
+                      : `expires ${new Date(invite.expires_at).toLocaleDateString()}`}
+                  </span>
+                </span>
+                <button className="btn btn-ghost" onClick={() => revokeInvite(invite)}>
+                  Revoke
+                </button>
+              </div>
+            ))}
+          </section>
+        )}
       </div>
 
       {inviteOpen && workspace && (

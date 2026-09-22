@@ -10,8 +10,8 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  // No email_verified: verification state is not stored (auth_tokens and
-  // users.email_verified_at were removed from the schema by decision).
+  /** FR-1: false until the emailed link is opened; the API refuses everything else meanwhile */
+  email_verified: boolean;
 }
 
 export interface WorkspaceSummary {
@@ -35,8 +35,8 @@ export interface WorkspaceMember {
   email: string;
   role: Role;
   joined_at: string;
-  /** Folders a guest has been granted (folder_grants). Only meaningful for role "guest". */
-  granted_folder_ids?: string[];
+  /** Documents a guest has been granted (document_grants, FR-21). Only meaningful for "guest". */
+  granted_document_ids?: string[];
 }
 
 export interface WorkspaceInvite {
@@ -44,6 +44,20 @@ export interface WorkspaceInvite {
   email: string;
   role: InvitableRole;
   expires_at: string;
+  created_at: string;
+  expired: boolean;
+  /** only in the response that creates the invite (the server keeps just a hash of the token) */
+  url?: string;
+  /** whether the invitation email went out; when false, hand `url` over yourself */
+  email_sent?: boolean;
+}
+
+/** What the holder of an invitation link sees before accepting. */
+export interface InvitePreview {
+  workspace_name: string;
+  role: InvitableRole;
+  email: string;
+  expired: boolean;
 }
 
 export interface Folder {
@@ -84,16 +98,20 @@ export interface ShareLink {
   allow_download: boolean;
   has_password: boolean;
   expires_at: string | null;
+  /** the expiry date has passed (the link no longer works) */
+  expired: boolean;
   revoked_at: string | null;
   created_at: string;
 }
 
 export interface ActivityLogEntry {
   id: string;
+  actor_id: string;
   actor_name: string;
   action: string;
   target_type: string | null;
   target_id: string | null;
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -105,4 +123,32 @@ export interface Paginated<T> {
   items: T[];
   page: number;
   total: number;
+}
+
+export interface DocumentVersion {
+  version_number: number;
+  size_bytes: number;
+  mime_type: string;
+  created_by_name: string;
+  created_at: string;
+  is_current: boolean;
+}
+
+export interface ShareAccessLogEntry {
+  accessed_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  outcome: "ok" | "bad_password" | "expired" | "revoked";
+}
+
+/** What a link recipient gets (FR-15): one document's details and short-lived URLs, nothing else. */
+export interface PublicShare {
+  requires_password: boolean;
+  filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  allow_download: boolean | null;
+  expires_at: string | null;
+  download_url: string | null;
+  preview_url: string | null;
 }

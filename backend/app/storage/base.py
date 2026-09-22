@@ -19,7 +19,13 @@ class StorageBackend(Protocol):
     ) -> str: ...
 
     async def presign_download(
-        self, key: str, *, filename: str, content_type: str, expires_seconds: int
+        self,
+        key: str,
+        *,
+        filename: str,
+        content_type: str,
+        expires_seconds: int,
+        inline: bool = False,
     ) -> str: ...
 
     async def head(self, key: str) -> ObjectInfo | None: ...
@@ -37,14 +43,16 @@ class StorageConfigError(RuntimeError):
     """The storage backend is not usable as configured."""
 
 
-def content_disposition(filename: str) -> str:
-    """A safe `attachment` Content-Disposition for a user-supplied filename.
+def content_disposition(filename: str, *, inline: bool = False) -> str:
+    """A safe Content-Disposition for a user-supplied filename.
 
-    `attachment` makes the browser download instead of rendering, so an uploaded HTML or SVG file
-    can never run as script on the storage origin. Control characters, quotes, backslashes and
-    path separators are removed; non-ASCII names use the RFC 5987 `filename*` form with an ASCII
-    fallback.
+    `attachment` (the default) makes the browser download instead of rendering, so an uploaded
+    HTML or SVG file can never run as script on the storage origin. `inline` is only for callers
+    that have already limited the content type to formats that are safe to render (see
+    services/share_links.py). Control characters, quotes, backslashes and path separators are
+    removed; non-ASCII names use the RFC 5987 `filename*` form with an ASCII fallback.
     """
     cleaned = re.sub(r'[\x00-\x1f\x7f"\\/]', "", filename).strip() or "download"
     fallback = re.sub(r"[^\x20-\x7e]", "_", cleaned)
-    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(cleaned, safe='')}"
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{fallback}\"; filename*=UTF-8''{quote(cleaned, safe='')}"

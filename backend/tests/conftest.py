@@ -34,6 +34,9 @@ for _key, _value in _DEFAULTS.items():
         os.environ[_key] = _value
 # tests sign and verify tokens with a fixed secret, whatever the developer's .env holds
 os.environ["JWT_SECRET"] = "test-secret-that-is-at-least-32-characters-long"
+# most tests sign users in straight after registering; the verification tests switch it on
+os.environ["REQUIRE_EMAIL_VERIFICATION"] = "false"
+os.environ["TOKEN_COOLDOWN_SECONDS"] = "0"
 
 import asyncpg  # noqa: E402
 import pytest  # noqa: E402
@@ -51,7 +54,9 @@ from alembic import command  # noqa: E402
 from app.config import BACKEND_DIR, Settings, get_settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import get_session  # noqa: E402
+from app.services.mailer import get_mailer  # noqa: E402
 from app.storage import get_storage  # noqa: E402
+from tests.fake_mailer import FakeMailer  # noqa: E402
 from tests.fake_storage import FakeStorage  # noqa: E402
 
 
@@ -145,10 +150,16 @@ def storage() -> FakeStorage:
 
 
 @pytest.fixture
+def mailer() -> FakeMailer:
+    return FakeMailer()
+
+
+@pytest.fixture
 async def client(
     session_factory: async_sessionmaker[AsyncSession],
     fast_password_hashing: None,
     storage: FakeStorage,
+    mailer: FakeMailer,
 ) -> AsyncIterator[AsyncClient]:
     async def override_session() -> AsyncIterator[AsyncSession]:
         async with session_factory() as session:
@@ -156,6 +167,7 @@ async def client(
 
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_storage] = lambda: storage
+    app.dependency_overrides[get_mailer] = lambda: mailer
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()

@@ -65,7 +65,13 @@ class S3Backend:
         return url
 
     async def presign_download(
-        self, key: str, *, filename: str, content_type: str, expires_seconds: int
+        self,
+        key: str,
+        *,
+        filename: str,
+        content_type: str,
+        expires_seconds: int,
+        inline: bool = False,
     ) -> str:
         async with self._client(self._public_endpoint) as s3:
             url: str = await s3.generate_presigned_url(
@@ -74,7 +80,7 @@ class S3Backend:
                     "Bucket": self._bucket,
                     "Key": key,
                     "ResponseContentType": content_type,
-                    "ResponseContentDisposition": content_disposition(filename),
+                    "ResponseContentDisposition": content_disposition(filename, inline=inline),
                 },
                 ExpiresIn=expires_seconds,
             )

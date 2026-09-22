@@ -55,3 +55,59 @@ describe("LoginPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong");
   });
 });
+
+describe("LoginPage next redirect", () => {
+  beforeEach(() => {
+    login.mockReset();
+  });
+
+  function renderWith(entry: string) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/invites/:token" element={<p>invite page</p>} />
+          <Route path="/workspaces" element={<p>workspaces page</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("returns to the invitation the visitor came from", async () => {
+    login.mockResolvedValue(undefined);
+    renderWith("/login?next=%2Finvites%2Ftok");
+    await fillAndSubmit();
+    expect(await screen.findByText("invite page")).toBeInTheDocument();
+  });
+
+  it("ignores a next address that leaves the app", async () => {
+    login.mockResolvedValue(undefined);
+    renderWith("/login?next=%2F%2Fevil.example");
+    await fillAndSubmit();
+    expect(await screen.findByText("workspaces page")).toBeInTheDocument();
+  });
+
+  it("keeps next on the link to sign up", () => {
+    renderWith("/login?next=%2Finvites%2Ftok");
+    expect(screen.getByRole("link", { name: /Sign up/ })).toHaveAttribute(
+      "href",
+      "/signup?next=%2Finvites%2Ftok",
+    );
+  });
+});
+
+describe("LoginPage forgot password", () => {
+  it("links to the password reset page", () => {
+    render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "Forgot your password?" })).toHaveAttribute(
+      "href",
+      "/forgot-password",
+    );
+  });
+});

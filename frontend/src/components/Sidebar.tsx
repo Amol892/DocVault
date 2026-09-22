@@ -6,9 +6,12 @@ import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { can } from "@/permissions/roleHierarchy";
 import { useSafeAction } from "@/hooks/useSafeAction";
 import { UserMenu } from "@/components/UserMenu";
+import { FolderPickerModal } from "@/components/FolderPickerModal";
+import { subtreeIds } from "@/components/folderTree";
 
-// FR-21: the API already scopes the folder list by role (a Guest only gets folders they were
-// granted), so this shows exactly what it returns. Member and above may create, rename and delete.
+// FR-21: the folder list is a Member-and-above concept — the API always returns it empty for a
+// Guest, who instead sees a flat list of individually granted documents on the dashboard itself.
+// This shows exactly what the API returns. Member and above may create, rename and delete.
 export function Sidebar({ workspaceId }: { workspaceId: string }) {
   const { workspace, myRole } = useWorkspace();
   const navigate = useNavigate();
@@ -16,6 +19,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
   const { folderId } = useParams();
   const safe = useSafeAction();
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [moving, setMoving] = useState<Folder | null>(null);
 
   const reload = useCallback(
     () => safe(() => foldersApi.list(workspaceId)).then((res) => (res.ok ? res.value : null)),
@@ -39,10 +43,10 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
     if (list) setFolders(list);
   }
 
-  async function createFolder() {
-    const name = window.prompt("Folder name")?.trim();
+  async function createFolder(parent?: Folder) {
+    const name = window.prompt(parent ? `New folder in ${parent.name}` : "Folder name")?.trim();
     if (!name) return;
-    const res = await safe(() => foldersApi.create(workspaceId, name, null));
+    const res = await safe(() => foldersApi.create(workspaceId, name, parent?.id ?? null));
     if (res.ok) await refresh();
   }
 
@@ -51,6 +55,14 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
     if (!name || name === folder.name) return;
     const res = await safe(() => foldersApi.rename(folder.id, name));
     if (res.ok) await refresh();
+  }
+
+  async function moveFolder(target: string | null) {
+    if (!moving) return;
+    const res = await safe(() => foldersApi.move(moving.id, target));
+    if (!res.ok) return;
+    setMoving(null);
+    await refresh();
   }
 
   async function deleteFolder(folder: Folder) {
@@ -116,6 +128,12 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
           </div>
           {canManage && (
             <>
+              <IconButton label={`New folder in ${f.name}`} onClick={() => createFolder(f)}>
+                +
+              </IconButton>
+              <IconButton label={`Move ${f.name}`} onClick={() => setMoving(f)}>
+                ↪
+              </IconButton>
               <IconButton label={`Rename ${f.name}`} onClick={() => renameFolder(f)}>
                 ✎
               </IconButton>
@@ -128,7 +146,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
       ))}
       {canManage && (
         <button
-          onClick={createFolder}
+          onClick={() => createFolder()}
           style={{
             textAlign: "left",
             padding: "7px 10px",
@@ -156,11 +174,34 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
             Workspace
           </div>
           <SidebarLink
+            to={`/workspaces/${workspaceId}/trash`}
+            active={location.pathname.endsWith("/trash")}
+            label="🗑 Trash"
+          />
+          <SidebarLink
             to={`/workspaces/${workspaceId}/members`}
             active={location.pathname.endsWith("/members")}
             label="👥 Members & Roles"
           />
+          {can(myRole, "VIEW_ACTIVITY_LOG") && (
+            <SidebarLink
+              to={`/workspaces/${workspaceId}/activity`}
+              active={location.pathname.endsWith("/activity")}
+              label="🕘 Activity"
+            />
+          )}
         </>
+      )}
+
+      {moving && (
+        <FolderPickerModal
+          title={`Move ${moving.name}`}
+          folders={folders}
+          excludeIds={subtreeIds(folders, moving.id)}
+          currentId={moving.parent_folder_id}
+          onPick={moveFolder}
+          onClose={() => setMoving(null)}
+        />
       )}
 
       <div style={{ marginTop: "auto", display: "flex", flexDirection: "column" }}>
@@ -175,7 +216,7 @@ export function Sidebar({ workspaceId }: { workspaceId: string }) {
               borderRadius: "var(--radius-sm)",
             }}
           >
-            You're a Guest here — you can only see folders that were shared with you.
+            You're a Guest here — you can only see documents that were shared with you directly.
           </div>
         )}
         <UserMenu placement="up" />

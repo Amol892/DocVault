@@ -3,7 +3,7 @@ import { Modal } from "./Modal";
 import { shareLinksApi } from "@/api/shareLinks";
 import { useToast } from "@/hooks/useToast";
 import { useSafeAction } from "@/hooks/useSafeAction";
-import type { Document, ShareLink } from "@/types";
+import type { Document, ShareAccessLogEntry, ShareLink } from "@/types";
 
 interface ShareLinkModalProps {
   document: Document;
@@ -25,14 +25,31 @@ export function ShareLinkModal({ document, onClose, onVisibilityChanged }: Share
   const [requirePassword, setRequirePassword] = useState(false);
   const [password, setPassword] = useState("");
   const [setExpiry, setSetExpiry] = useState(true);
+  const [log, setLog] = useState<ShareAccessLogEntry[]>([]);
   const toast = useToast();
   const safe = useSafeAction();
+
+  // FR-14: recent openings of the active link
+  const linkId = link?.id;
+  useEffect(() => {
+    if (!linkId) {
+      setLog([]);
+      return;
+    }
+    let cancelled = false;
+    safe(() => shareLinksApi.accessLog(linkId)).then((res) => {
+      if (!cancelled && res.ok) setLog(res.value.items.slice(0, 5));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [linkId, safe]);
 
   useEffect(() => {
     let cancelled = false;
     safe(() => shareLinksApi.list(document.id)).then((res) => {
       if (cancelled) return;
-      if (res.ok) setLink(res.value.find((l) => !l.revoked_at) ?? null);
+      if (res.ok) setLink(res.value.find((l) => !l.revoked_at && !l.expired) ?? null);
       setLoading(false);
     });
     return () => {
@@ -60,6 +77,15 @@ export function ShareLinkModal({ document, onClose, onVisibilityChanged }: Share
     setPassword("");
     onVisibilityChanged(document.id, "public");
     toast("Public share link created");
+  }
+
+  async function toggleDownload(checked: boolean) {
+    if (!link) {
+      setAllowDownload(checked);
+      return;
+    }
+    const res = await safe(() => shareLinksApi.updateAllowDownload(link.id, checked));
+    if (res.ok) setLink(res.value);
   }
 
   async function revokeLink() {
@@ -127,10 +153,9 @@ export function ShareLinkModal({ document, onClose, onVisibilityChanged }: Share
 
       <ToggleRow
         label="Allow download"
-        sub="Recipients can download, not just view"
+        sub="Recipients can download, not just view — changeable any time, even after the link is out"
         checked={link ? link.allow_download : allowDownload}
-        onChange={setAllowDownload}
-        disabled={!!link}
+        onChange={toggleDownload}
       />
       <ToggleRow
         label="Require password"
@@ -158,6 +183,28 @@ export function ShareLinkModal({ document, onClose, onVisibilityChanged }: Share
         onChange={setSetExpiry}
         disabled={!!link}
       />
+
+      {link && (
+        <div style={{ marginTop: 16, fontSize: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Recent access</div>
+          {log.length === 0 && (
+            <div style={{ color: "var(--color-text-secondary)" }}>Nobody has opened it yet.</div>
+          )}
+          {log.map((entry, i) => (
+            <div
+              key={i}
+              style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}
+            >
+              <span>
+                {new Date(entry.accessed_at).toLocaleString()} · {entry.ip_address ?? "unknown"}
+              </span>
+              <span style={{ color: "var(--color-text-secondary)" }}>
+                {entry.outcome === "ok" ? "opened" : entry.outcome.replace("_", " ")}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
         {link ? (

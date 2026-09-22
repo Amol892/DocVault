@@ -1,7 +1,18 @@
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, documents, folders, health, members, workspaces
+from app.api.routes import (
+    activity,
+    auth,
+    documents,
+    folders,
+    health,
+    invites,
+    members,
+    public,
+    share_links,
+    workspaces,
+)
 from app.config import get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
@@ -25,8 +36,12 @@ def create_app() -> FastAPI:
     api.include_router(auth.router)
     api.include_router(workspaces.router)
     api.include_router(members.router)
+    api.include_router(invites.router)
+    api.include_router(activity.router)
     api.include_router(folders.router)
     api.include_router(documents.router)
+    api.include_router(share_links.router)
+    api.include_router(public.router)
     app.include_router(api)
     return app
 
