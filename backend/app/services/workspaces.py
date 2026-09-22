@@ -94,10 +94,15 @@ async def _load_target_for_update(
 ) -> WorkspaceMember:
     """The target's membership, row-locked so a concurrent change cannot slip in between the
     checks below and our write. 404 if they are not a member of THIS workspace."""
+    # populate_existing: the caller's own membership row is very likely already in this
+    # session's identity map (get_workspace_access loaded it, unlocked, to authorize the
+    # request) — without this, SQLAlchemy would hand back that stale cached object instead of
+    # the row this FOR UPDATE just re-read, defeating the lock as a staleness check entirely.
     result = await session.execute(
         select(WorkspaceMember)
         .where(WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.user_id == user_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     target = result.scalar_one_or_none()
     if target is None:
@@ -166,10 +171,14 @@ async def transfer_ownership(
     unique index that is checked immediately), so the current Owner is demoted and flushed BEFORE
     the target is promoted.
     """
-    # lock the workspace row: two concurrent transfers must not both succeed
+    # lock the workspace row: two concurrent transfers must not both succeed. populate_existing
+    # matters here too — access.workspace was already loaded, unlocked, by get_workspace_access.
     workspace = (
         await session.execute(
-            select(Workspace).where(Workspace.id == access.workspace.id).with_for_update()
+            select(Workspace)
+            .where(Workspace.id == access.workspace.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one()
     caller = await _load_target_for_update(session, workspace.id, access.user.id)
