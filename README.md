@@ -4,7 +4,7 @@ Multi-tenant document vault: workspaces, roles (Owner / Admin / Member / Guest),
 
 **Stack:** FastAPI · SQLAlchemy 2 (async) · Alembic · PostgreSQL 18 · MinIO/S3 · React 19 · TypeScript · Vite · Docker Compose.
 
-This README is the submission document for the *File Storage & Sharing* take-home assignment: how to run it, how it's built, every gap in the brief and the call I made on it, the security posture, the product improvement I chose, and how I worked with my coding agent. The full product spec lives in [PRD/](PRD/README.md), day-to-day usage in [USER_GUIDE.md](USER_GUIDE.md), and a verified, dated record of every implementation slice in [plans/](plans/README.md).
+This README is the submission document for the *File Storage & Sharing* take-home assignment: how to run it, how it's built, every gap in the brief and the call I made on it, the security posture, the product improvement I chose, and how I worked with my coding agent. The full product spec lives in [PRD/](PRD/README.md), day-to-day usage in [USER_GUIDE.md](USER_GUIDE.md), a sequential code walkthrough in [PROCESS_FLOW.md](PROCESS_FLOW.md), and a verified, dated record of every implementation slice in [plans/](plans/README.md).
 
 ## Contents
 
